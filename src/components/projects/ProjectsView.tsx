@@ -23,6 +23,7 @@ import { Project, ProjectStatus } from '../../types';
 import { formatCurrency, formatDate, formatPercent, PROJECT_STATUS_MAP, CURRENCY_INFO } from '../../utils/formatters';
 import { exportProjectsData } from '../../utils/exportService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { ProjectStatusTracker } from './ProjectStatusTracker';
 
 interface ProjectsViewProps {
   onOpenCreate: () => void;
@@ -155,19 +156,25 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
           >
             الكل ({db.projects.length})
           </button>
-          {Object.entries(PROJECT_STATUS_MAP).map(([key, val]) => {
+          {(['in_progress', 'completed', 'on_hold', 'planning', 'cancelled'] as ProjectStatus[]).map((key) => {
+            const val = PROJECT_STATUS_MAP[key];
             const count = db.projects.filter(p => p.status === key).length;
+            const isSelected = statusFilter === key;
             return (
               <button
                 key={key}
-                onClick={() => setStatusFilter(key as ProjectStatus)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
-                  statusFilter === key
-                    ? 'bg-emerald-800 text-white font-semibold'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                onClick={() => setStatusFilter(key)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+                  isSelected
+                    ? 'bg-emerald-800 text-white font-semibold shadow-2xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
-                {val.label} ({count})
+                <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-white' : val.dotClass}`} />
+                <span>{val.label}</span>
+                <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${isSelected ? 'bg-emerald-900 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                  {count}
+                </span>
               </button>
             );
           })}
@@ -212,9 +219,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                       >
                         {project.name}
                       </h3>
-                      <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${statusMeta.bgClass} ${statusMeta.textClass}`}>
-                        {statusMeta.label}
-                      </span>
+                      <ProjectStatusTracker project={project} compact={true} />
                       {/* Currency Badge */}
                       <span
                         className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 border ${
@@ -330,6 +335,11 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                       المتوقع: {formatCurrency(fin?.expectedProfit, project.currency || 'SAR')}
                     </span>
                   </div>
+                </div>
+
+                {/* Project Status Workflow & Tracker */}
+                <div className="mt-3">
+                  <ProjectStatusTracker project={project} compact={false} />
                 </div>
 
                 {/* Project Card Budget Progress Strip */}

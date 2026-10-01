@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Receipt, Plus, Search, Trash2, Edit, Briefcase, Filter } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ProjectExpense, ExpenseCategory } from '../../types';
-import { formatSAR, formatDate, EXPENSE_CATEGORY_MAP } from '../../utils/formatters';
+import { formatSAR, formatCurrency, convertTransactionAmount, CURRENCY_INFO, formatDate, EXPENSE_CATEGORY_MAP } from '../../utils/formatters';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { StatCard } from '../common/StatCard';
 
@@ -139,6 +139,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
                 <tr>
                   <th className="py-3 px-3.5">رقم المصروف</th>
+                  <th className="py-3 px-3.5">العملة</th>
                   <th className="py-3 px-3.5">التاريخ</th>
                   <th className="py-3 px-3.5">المشروع</th>
                   <th className="py-3 px-3.5">التصنيف</th>
@@ -157,6 +158,19 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                     <tr key={expense.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-3 px-3.5 font-mono font-bold text-slate-900">
                         {expense.expenseNumber}
+                      </td>
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        {(() => {
+                          const expCurr = expense.currency || project?.currency || 'SAR';
+                          const info = CURRENCY_INFO[expCurr];
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                              <span>{info?.flag || '🌐'}</span>
+                              <span className="font-mono">{expCurr}</span>
+                              <span className="text-slate-500 font-normal text-[10px]">({info?.symbol || expCurr})</span>
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="py-3 px-3.5 font-mono text-slate-600">
                         {formatDate(expense.expenseDate)}
@@ -182,9 +196,23 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                         {expense.description}
                       </td>
                       <td className="py-3 px-3.5 font-medium text-slate-700">{expense.vendor || '-'}</td>
-                      <td className="py-3 px-3.5 font-mono font-bold text-rose-700 text-sm">
-                        -{formatSAR(expense.amount)}
-                      </td>
+                      {(() => {
+                        const expCurr = expense.currency || project?.currency || 'SAR';
+                        const isDiff = project && expCurr !== project.currency;
+                        const converted = isDiff
+                          ? convertTransactionAmount(expense.amount, expCurr, project.currency, expense.exchangeRate)
+                          : expense.amount;
+                        return (
+                          <td className="py-3 px-3.5 font-mono font-bold text-rose-700 text-sm">
+                            <div>-{formatCurrency(expense.amount, expCurr)}</div>
+                            {isDiff && (
+                              <div className="text-[10px] text-slate-500 font-sans font-normal mt-0.5">
+                                يعادل: {formatCurrency(converted, project.currency)}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })()}
                       <td className="py-3 px-3.5 text-slate-600 text-[11px]">
                         {expense.paymentMethod === 'credit_card'
                           ? 'بطاقة ائتمانية'

@@ -279,7 +279,7 @@ export const ReportsView: React.FC = () => {
           return cell;
         })
       ),
-      footerNotes: `تم توليد هذا التقرير تلقائياً بواسطة منصة Osboha Electric المالية. جميع المبالغ موحدة بعملة (${currentCurrencyInfo.name} - ${symbol}).`,
+      footerNotes: `تم توليد هذا التقرير تلقائياً بواسطة منصة Osboha Electric لإدارة المشاريع والمالية والأرباح. جميع المبالغ موحدة بعملة (${currentCurrencyInfo.name} - ${symbol}).`,
     });
   };
 

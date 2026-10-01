@@ -1,6 +1,6 @@
 {
-  "name": "منصة ركائز لإدارة المشاريع والمالية والأرباح",
-  "description": "منصة سحابية متكاملة لإدارة المشاريع، العملاء، أعضاء الفريق، الفواتير، التحصيلات، المصروفات، وحساب الأرباح الفعلية والمتوقعة بالريال السعودي.",
+  "name": "Osboha Electric",
+  "description": "منصة Osboha Electric لإدارة المشاريع والمالية والأرباح بالريال السعودي والجنيه المصري.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

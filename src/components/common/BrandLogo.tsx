@@ -4,6 +4,7 @@ interface BrandLogoProps {
   variant?: 'light' | 'dark'; // 'light' for light backgrounds, 'dark' for dark backgrounds
   size?: 'sm' | 'md' | 'lg';
   showSubtitle?: boolean;
+  subtitle?: string;
   iconOnly?: boolean;
   className?: string;
 }
@@ -12,6 +13,7 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
   variant = 'dark',
   size = 'md',
   showSubtitle = true,
+  subtitle = 'إدارة المشاريع والمالية والأرباح',
   iconOnly = false,
   className = '',
 }) => {
@@ -91,7 +93,7 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
       {/* Brand Typography */}
       {!iconOnly && (
         <div className="flex flex-col text-right">
-          <div className="flex items-center gap-1.5 leading-none">
+          <div className="flex items-center gap-1.5 leading-none" dir="ltr">
             <span
               className={`font-black tracking-tight ${iconDimensions.text} font-sans ${
                 isDark ? 'text-white' : 'text-slate-950'
@@ -116,7 +118,7 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
                 isDark ? 'text-cyan-400/90' : 'text-slate-500'
               }`}
             >
-              للمقاولات والحلول الكهربائية والمالية
+              {subtitle}
             </span>
           )}
         </div>

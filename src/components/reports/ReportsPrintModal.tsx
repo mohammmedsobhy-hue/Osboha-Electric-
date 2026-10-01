@@ -251,7 +251,7 @@ export const ReportsPrintModal: React.FC<ReportsPrintModalProps> = ({
                   معاينة وتصدير لوحة التقارير والرسوم البيانية إلى PDF
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  منصة Osboha Electric · تنسيق طباعة معتمد باللغة العربية مع دعم الرسوم البيانية والجداول
+                  منصة Osboha Electric لإدارة المشاريع والمالية والأرباح · تنسيق طباعة معتمد باللغة العربية مع دعم الرسوم البيانية والجداول
                 </p>
               </div>
             </div>
@@ -860,7 +860,7 @@ export const ReportsPrintModal: React.FC<ReportsPrintModalProps> = ({
           {/* Official Footer Note */}
           <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[10px] text-slate-400 font-mono">
             <div>
-              تم استخراج وتوثيق هذا التقرير تلقائيًا من نظام <strong className="text-slate-600">Osboha Electric</strong> للمقاولات والتجهيزات الهندسية والكهربائية
+              تم استخراج وتوثيق هذا التقرير تلقائيًا من منصة <strong className="text-slate-600">Osboha Electric</strong> لإدارة المشاريع والمالية والأرباح
             </div>
             <div>
               صفحة 1 من 1 · سري وخاص بالإدارة المالية · كود الوثيقة: {reportRef}

@@ -19,8 +19,9 @@ import {
   DashboardFilters,
   ProjectTask,
   User,
+  ProjectAttachment,
 } from '../types';
-import { convertCurrency, DEFAULT_EXCHANGE_RATE_SAR_TO_EGP } from '../utils/formatters';
+import { convertCurrency, convertTransactionAmount, DEFAULT_EXCHANGE_RATE_SAR_TO_EGP } from '../utils/formatters';
 
 export interface AppDatabase {
   clients: Client[];
@@ -33,6 +34,7 @@ export interface AppDatabase {
   expenses: ProjectExpense[];
   tasks: ProjectTask[];
   users: User[];
+  attachments: ProjectAttachment[];
 }
 
 const STORAGE_KEY = 'rakaiz_financial_db_v1';
@@ -142,6 +144,8 @@ export const INITIAL_DATA: AppDatabase = {
       startDate: '2026-01-15',
       endDate: '2026-05-30',
       status: 'in_progress',
+      statusUpdatedAt: '2026-01-15T10:00:00Z',
+      statusNote: 'العمل جارٍ ومستمر وفق الجدول الزمني لمراحل التطوير',
       description: 'بناء منصة متكاملة لإدارة عقود الإيجار، الصيانة الإلكترونية، وبوابة المستأجرين.',
       createdAt: '2026-01-15T10:00:00Z',
     },
@@ -156,6 +160,8 @@ export const INITIAL_DATA: AppDatabase = {
       startDate: '2026-02-01',
       endDate: '2026-04-15',
       status: 'in_progress',
+      statusUpdatedAt: '2026-02-01T11:00:00Z',
+      statusNote: 'مرحلة الربط مع بوابات الدفع والتوصيل السريع',
       description: 'تطبيق وموقع تجارة إلكترونية يدعم التوصيل الفوري والدفع عبر Apple Pay ومدى.',
       createdAt: '2026-02-01T11:00:00Z',
     },
@@ -169,7 +175,9 @@ export const INITIAL_DATA: AppDatabase = {
       currency: 'SAR',
       startDate: '2026-02-15',
       endDate: '2026-08-30',
-      status: 'in_progress',
+      status: 'on_hold',
+      statusUpdatedAt: '2026-03-01T14:30:00Z',
+      statusNote: 'متوقف مؤقتاً في انتظار متطلبات الربط السحابي وموافقة العميل على الـ API',
       description: 'نظام إدارة لوجستية وسلاسل إمداد وربط المستودعات والفواتير الضريبية.',
       createdAt: '2026-02-15T09:30:00Z',
     },
@@ -184,8 +192,26 @@ export const INITIAL_DATA: AppDatabase = {
       startDate: '2026-01-05',
       endDate: '2026-03-10',
       status: 'completed',
+      statusUpdatedAt: '2026-03-10T16:00:00Z',
+      statusNote: 'تم تسليم المشروع بنجاح والحصول على محضر القبول النهائي',
       description: 'تطوير لوحة تحكم تفاعلية لعرض مؤشرات الأداء المالي والمحافظ الاستثمارية بالجنيه المصري.',
       createdAt: '2026-01-05T08:30:00Z',
+    },
+    {
+      id: 'p-5',
+      code: 'PRJ-2026-005',
+      name: 'منصة إدارة أصول الطاقة والفوترة الذكية',
+      clientId: 'c-1',
+      contractValue: 180000,
+      approvedBudget: 20000,
+      currency: 'SAR',
+      startDate: '2026-04-01',
+      endDate: '2026-09-30',
+      status: 'planning',
+      statusUpdatedAt: '2026-03-12T09:00:00Z',
+      statusNote: 'مرحلة إعداد كراسة الشروط والمواصفات الفنية وجدولة الموارد',
+      description: 'تطوير نظام لمراقبة استهلاك الطاقة وتوليد الفواتير الآلية ومؤشرات الترشيد.',
+      createdAt: '2026-03-12T09:00:00Z',
     },
   ],
 
@@ -787,11 +813,11 @@ export const INITIAL_DATA: AppDatabase = {
       endDate: '2026-04-20',
       durationDays: 10,
       progress: 0,
-      status: 'not_started',
+      status: 'pending',
       assignedMemberId: 't-1',
       dependencies: ['tsk-1-5'],
       isMilestone: true,
-      notes: 'إطلاق المنصة رسمياً للجمهور',
+      notes: 'إطلاق المنصة رسمياً للجمهور بعد استكمال الفحوصات',
       createdAt: '2026-04-10T08:00:00Z',
     },
 
@@ -857,7 +883,7 @@ export const INITIAL_DATA: AppDatabase = {
       endDate: '2026-04-15',
       durationDays: 10,
       progress: 0,
-      status: 'not_started',
+      status: 'pending',
       assignedMemberId: 't-4',
       dependencies: ['tsk-2-4'],
       isMilestone: true,
@@ -899,7 +925,7 @@ export const INITIAL_DATA: AppDatabase = {
       endDate: '2026-05-30',
       durationDays: 45,
       progress: 0,
-      status: 'not_started',
+      status: 'pending',
       assignedMemberId: 't-1',
       dependencies: ['tsk-3-2'],
       createdAt: '2026-04-15T08:00:00Z',
@@ -912,11 +938,82 @@ export const INITIAL_DATA: AppDatabase = {
       endDate: '2026-06-25',
       durationDays: 24,
       progress: 0,
-      status: 'not_started',
+      status: 'on_hold',
       assignedMemberId: 't-5',
       dependencies: ['tsk-3-3'],
       isMilestone: true,
+      notes: 'معلقة لحين اكتمال مرحلة الفوترة واعتماد الشهادات',
       createdAt: '2026-06-01T08:00:00Z',
+    },
+
+    // Project 4 Tasks (لوحة مؤشرات الأداء الاستثماري - مكتمل)
+    {
+      id: 'tsk-4-1',
+      projectId: 'p-4',
+      title: 'تحديد مؤشرات الأداء المالي وصيغ التحليل',
+      startDate: '2026-01-05',
+      endDate: '2026-01-20',
+      durationDays: 15,
+      progress: 100,
+      status: 'completed',
+      assignedMemberId: 't-1',
+      dependencies: [],
+      createdAt: '2026-01-05T08:00:00Z',
+    },
+    {
+      id: 'tsk-4-2',
+      projectId: 'p-4',
+      title: 'تطوير الرسوم البيانية التفاعلية ومخططات العوائد',
+      startDate: '2026-01-20',
+      endDate: '2026-02-20',
+      durationDays: 31,
+      progress: 100,
+      status: 'completed',
+      assignedMemberId: 't-3',
+      dependencies: ['tsk-4-1'],
+      createdAt: '2026-01-20T08:00:00Z',
+    },
+    {
+      id: 'tsk-4-3',
+      projectId: 'p-4',
+      title: 'الفحص النهائي والاعتماد والتسليم للعميل',
+      startDate: '2026-02-20',
+      endDate: '2026-03-10',
+      durationDays: 18,
+      progress: 100,
+      status: 'completed',
+      assignedMemberId: 't-1',
+      dependencies: ['tsk-4-2'],
+      isMilestone: true,
+      createdAt: '2026-02-20T08:00:00Z',
+    },
+
+    // Project 5 Tasks (منصة إدارة أصول الطاقة والفوترة الذكية - تخطيط)
+    {
+      id: 'tsk-5-1',
+      projectId: 'p-5',
+      title: 'إعداد كراسة الشروط والمواصفات الفنية للمنصة',
+      startDate: '2026-04-01',
+      endDate: '2026-04-20',
+      durationDays: 19,
+      progress: 0,
+      status: 'pending',
+      assignedMemberId: 't-1',
+      dependencies: [],
+      createdAt: '2026-03-12T09:00:00Z',
+    },
+    {
+      id: 'tsk-5-2',
+      projectId: 'p-5',
+      title: 'تحديد متطلبات العدادات الذكية وأجهزة الـ IoT',
+      startDate: '2026-04-20',
+      endDate: '2026-05-15',
+      durationDays: 25,
+      progress: 0,
+      status: 'pending',
+      assignedMemberId: 't-2',
+      dependencies: ['tsk-5-1'],
+      createdAt: '2026-03-12T09:00:00Z',
     },
   ],
 
@@ -955,6 +1052,183 @@ export const INITIAL_DATA: AppDatabase = {
       createdAt: '2026-01-10T08:00:00Z',
     },
   ],
+
+  attachments: [
+    // Project 1 Attachments (بوابة الخدمات الرقمية والأعمال الكهربائية)
+    {
+      id: 'att-1-1',
+      projectId: 'p-1',
+      name: 'عقد_المقاولة_والأعمال_الكهربائية_المعتمد.pdf',
+      originalName: 'Contract_AlOfuq_Electrical_2026.pdf',
+      category: 'contract',
+      fileType: 'application/pdf',
+      fileExtension: 'pdf',
+      sizeBytes: 3850000,
+      sizeFormatted: '3.7 ميجابايت',
+      uploadedBy: 'عبدالرحمن الشريف',
+      version: 'v1.2',
+      notes: 'العقد المالي والهندسي المعتمد والموقع من الرئيس التنفيذي لشركة الأفق والمختوم رسمياً',
+      uploadedAt: '2026-01-15T10:30:00Z',
+    },
+    {
+      id: 'att-1-2',
+      projectId: 'p-1',
+      name: 'مخطط_التمديدات_الكهربائية_واللوحات_التنفيذية_E-01.dwg',
+      originalName: 'Schematic_Power_Distribution_E01.dwg',
+      category: 'blueprint',
+      fileType: 'application/acad',
+      fileExtension: 'dwg',
+      sizeBytes: 14800000,
+      sizeFormatted: '14.1 ميجابايت',
+      uploadedBy: 'م. فهد السبيعي',
+      version: 'v2.0',
+      notes: 'المخططات التنفيذية التفصيلية لمسارات الكابلات وقواطع التوزيع الرئيسية وقنوات الجهد المنخفض',
+      uploadedAt: '2026-01-26T14:15:00Z',
+    },
+    {
+      id: 'att-1-3',
+      projectId: 'p-1',
+      name: 'كراسة_المواصفات_الفنية_وقواطع_الجهد_المنخفض.pdf',
+      originalName: 'Technical_Specs_Switchgear_ABB.pdf',
+      category: 'specifications',
+      fileType: 'application/pdf',
+      fileExtension: 'pdf',
+      sizeBytes: 2100000,
+      sizeFormatted: '2.0 ميجابايت',
+      uploadedBy: 'م. فهد السبيعي',
+      version: 'v1.0',
+      notes: 'مواصفات القواطع ولوحات التوزيع المعتمدة من الاستشاري الهندسي المشرف',
+      uploadedAt: '2026-02-05T09:00:00Z',
+    },
+    {
+      id: 'att-1-4',
+      projectId: 'p-1',
+      name: 'محضر_المعاينة_الفنية_وبدء_الأعمال_الميدانية.pdf',
+      originalName: 'Site_Handover_Inspection_Act.pdf',
+      category: 'acceptance_act',
+      fileType: 'application/pdf',
+      fileExtension: 'pdf',
+      sizeBytes: 850000,
+      sizeFormatted: '830 كيلوبايت',
+      uploadedBy: 'عمر باوزير',
+      version: 'v1.0',
+      notes: 'محضر تسليم الموقع الفعلي وإذن مباشرة أعمال التمديدات بالقواطع الرئيسية',
+      uploadedAt: '2026-02-12T11:45:00Z',
+    },
+
+    // Project 2 Attachments (تطبيق التجزئة وأنظمة الطاقة الذكية)
+    {
+      id: 'att-2-1',
+      projectId: 'p-2',
+      name: 'عقد_توريد_وتركيب_أنظمة_الطاقة_والتحكم.pdf',
+      originalName: 'Najd_Energy_Contract_Signed.pdf',
+      category: 'contract',
+      fileType: 'application/pdf',
+      fileExtension: 'pdf',
+      sizeBytes: 2600000,
+      sizeFormatted: '2.5 ميجابايت',
+      uploadedBy: 'عبدالرحمن الشريف',
+      version: 'v1.0',
+      notes: 'عقد التوريد والتركيب المعتمد لغرف التحكم وحساسات الطاقة',
+      uploadedAt: '2026-02-01T09:30:00Z',
+    },
+    {
+      id: 'att-2-2',
+      projectId: 'p-2',
+      name: 'مخطط_مسارات_الكابلات_وغرفة_المحولات_الرئيسية.dwg',
+      originalName: 'Transformer_Room_Layout_v15.dwg',
+      category: 'blueprint',
+      fileType: 'application/acad',
+      fileExtension: 'dwg',
+      sizeBytes: 7400000,
+      sizeFormatted: '7.1 ميجابايت',
+      uploadedBy: 'م. فهد السبيعي',
+      version: 'v1.5',
+      notes: 'المخطط الهندسي لغرفة المحولات والتأريض ومسارات كابلات التغذية',
+      uploadedAt: '2026-02-10T16:20:00Z',
+    },
+
+    // Project 3 Attachments (نظام ERP السحابي والمستودعات)
+    {
+      id: 'att-3-1',
+      projectId: 'p-3',
+      name: 'عقد_تأسيس_البنية_التحتية_الكهربائية_للمستودعات.pdf',
+      originalName: 'Rawabi_Warehouse_Contract_v1.pdf',
+      category: 'contract',
+      fileType: 'application/pdf',
+      fileExtension: 'pdf',
+      sizeBytes: 1950000,
+      sizeFormatted: '1.9 ميجابايت',
+      uploadedBy: 'عبدالرحمن الشريف',
+      version: 'v1.0',
+      notes: 'عقد تنفيذ أعمال التغذية لمستودعات شركة الروابي',
+      uploadedAt: '2026-02-15T12:00:00Z',
+    },
+    {
+      id: 'att-3-2',
+      projectId: 'p-3',
+      name: 'مخطط_لوحات_الطاقة_الاحتياطية_ومولدات_UPS.png',
+      originalName: 'Backup_Generators_Single_Line_Diagram.png',
+      category: 'blueprint',
+      fileType: 'image/png',
+      fileExtension: 'png',
+      sizeBytes: 3100000,
+      sizeFormatted: '3.0 ميجابايت',
+      uploadedBy: 'عمر باوزير',
+      version: 'v1.1',
+      notes: 'مخطط أحادي الخط (Single Line Diagram) للمولدات ووحدات عدم انقطاع التيار',
+      uploadedAt: '2026-03-01T15:00:00Z',
+    },
+
+    // Project 4 Attachments (لوحة مؤشرات الأداء الاستثماري - مشروع مكتمل)
+    {
+      id: 'att-4-1',
+      projectId: 'p-4',
+      name: 'محضر_الاستلام_النهائي_وإخلاء_الطرف.pdf',
+      originalName: 'Final_Acceptance_Certificate_Approved.pdf',
+      category: 'acceptance_act',
+      fileType: 'application/pdf',
+      fileExtension: 'pdf',
+      sizeBytes: 1100000,
+      sizeFormatted: '1.0 ميجابايت',
+      uploadedBy: 'م. فهد السبيعي',
+      version: 'v-النهائي',
+      notes: 'محضر الاستلام والتسليم النهائي المعتمد بنجاح بدون ملاحظات',
+      uploadedAt: '2026-03-10T16:00:00Z',
+    },
+    {
+      id: 'att-4-2',
+      projectId: 'p-4',
+      name: 'شهادة_إتمام_الأعمال_والضمان_الفني_المعتمدة.pdf',
+      originalName: 'Warranty_and_Completion_Certificate.pdf',
+      category: 'permit',
+      fileType: 'application/pdf',
+      fileExtension: 'pdf',
+      sizeBytes: 950000,
+      sizeFormatted: '927 كيلوبايت',
+      uploadedBy: 'عبدالرحمن الشريف',
+      version: 'v1.0',
+      notes: 'شهادة الضمان الفني للأعمال والمعدات لمدة 24 شهراً',
+      uploadedAt: '2026-03-10T16:30:00Z',
+    },
+
+    // Project 5 Attachments (منصة إدارة أصول الطاقة والفوترة الذكية - تخطيط)
+    {
+      id: 'att-5-1',
+      projectId: 'p-5',
+      name: 'كراسة_الشروط_والمواصفات_الفنية_لشبكة_العدادات_الذكية.pdf',
+      originalName: 'Smart_Meters_RFP_Draft_v0.9.pdf',
+      category: 'specifications',
+      fileType: 'application/pdf',
+      fileExtension: 'pdf',
+      sizeBytes: 4200000,
+      sizeFormatted: '4.0 ميجابايت',
+      uploadedBy: 'م. فهد السبيعي',
+      version: 'مسودة v0.9',
+      notes: 'المسودة الأولية لكراسة الشروط والمواصفات الفنية للعدادات وأجهزة القياس الذكية',
+      uploadedAt: '2026-03-12T09:15:00Z',
+    },
+  ],
 };
 
 /**
@@ -974,6 +1248,9 @@ export function loadDatabase(): AppDatabase {
     }
     if (!parsed.users || !Array.isArray(parsed.users) || parsed.users.length === 0) {
       parsed.users = INITIAL_DATA.users;
+    }
+    if (!parsed.attachments || !Array.isArray(parsed.attachments) || parsed.attachments.length === 0) {
+      parsed.attachments = INITIAL_DATA.attachments;
     }
     if (parsed.projects && Array.isArray(parsed.projects)) {
       parsed.projects.forEach((p: Project) => {
@@ -1028,11 +1305,19 @@ export function calculateProjectFinancials(projectId: string, db: AppDatabase): 
   const projectTeamPayments = db.teamPayments.filter(tp => tp.projectId === projectId);
   const projectExpenses = db.expenses.filter(e => e.projectId === projectId);
 
-  // 1. Total Invoiced = Sum of project invoices
-  const totalInvoiced = projectInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+  // 1. Total Invoiced = Sum of project invoices (converted to project base currency)
+  const totalInvoiced = projectInvoices.reduce((sum, inv) => {
+    const invCurr = inv.currency || project.currency || 'SAR';
+    const amountInProject = convertTransactionAmount(inv.totalAmount, invCurr, project.currency, inv.exchangeRate);
+    return sum + amountInProject;
+  }, 0);
 
-  // 2. Total Collected = Sum of client payments
-  const totalCollected = projectClientPayments.reduce((sum, cp) => sum + (cp.amount || 0), 0);
+  // 2. Total Collected = Sum of client payments (converted to project base currency)
+  const totalCollected = projectClientPayments.reduce((sum, cp) => {
+    const cpCurr = cp.currency || project.currency || 'SAR';
+    const amountInProject = convertTransactionAmount(cp.amount, cpCurr, project.currency, cp.exchangeRate);
+    return sum + amountInProject;
+  }, 0);
 
   // 3. Client Remaining = Total Invoiced - Total Collected
   // (In business terms, client balance due on issued invoices)
@@ -1040,10 +1325,16 @@ export function calculateProjectFinancials(projectId: string, db: AppDatabase): 
 
   // 4. Calculate detailed invoices with their paid amount & status
   const calculatedInvoices: CalculatedInvoice[] = projectInvoices.map(inv => {
-    // Payments linked to this invoice, or if no specific link, allocate proportionally
+    const invCurr = inv.currency || project.currency || 'SAR';
+
+    // Payments linked to this invoice, converted to invoice currency
     const directPayments = projectClientPayments
       .filter(cp => cp.invoiceId === inv.id)
-      .reduce((s, cp) => s + cp.amount, 0);
+      .reduce((s, cp) => {
+        const cpCurr = cp.currency || project.currency || 'SAR';
+        const inInvCurr = convertTransactionAmount(cp.amount, cpCurr, invCurr, cp.exchangeRate);
+        return s + inInvCurr;
+      }, 0);
 
     const paidAmount = directPayments;
     const remainingAmount = Math.max(0, inv.totalAmount - paidAmount);
@@ -1079,10 +1370,14 @@ export function calculateProjectFinancials(projectId: string, db: AppDatabase): 
       entitledAmount = assignment.compensationValue;
     }
 
-    // Team payments for this member on this project
+    // Team payments for this member on this project (converted to project base currency)
     const paidAmount = projectTeamPayments
       .filter(tp => tp.teamMemberId === assignment.teamMemberId)
-      .reduce((s, tp) => s + tp.amount, 0);
+      .reduce((s, tp) => {
+        const tpCurr = tp.currency || project.currency || 'SAR';
+        const inProjectCurr = convertTransactionAmount(tp.amount, tpCurr, project.currency, tp.exchangeRate);
+        return s + inProjectCurr;
+      }, 0);
 
     const remainingAmount = Math.max(0, entitledAmount - paidAmount);
     totalTeamEntitlements += entitledAmount;
@@ -1100,14 +1395,22 @@ export function calculateProjectFinancials(projectId: string, db: AppDatabase): 
     };
   });
 
-  // 6. Total Paid to Team
-  const totalTeamPaid = projectTeamPayments.reduce((sum, tp) => sum + (tp.amount || 0), 0);
+  // 6. Total Paid to Team (in project base currency)
+  const totalTeamPaid = projectTeamPayments.reduce((sum, tp) => {
+    const tpCurr = tp.currency || project.currency || 'SAR';
+    const inProjectCurr = convertTransactionAmount(tp.amount, tpCurr, project.currency, tp.exchangeRate);
+    return sum + inProjectCurr;
+  }, 0);
 
   // 7. Team Remaining = Total Team Entitlements - Total Paid
   const teamRemaining = Math.max(0, totalTeamEntitlements - totalTeamPaid);
 
-  // 8. Total Expenses & Budget Monitoring
-  const totalExpenses = projectExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+  // 8. Total Expenses & Budget Monitoring (converted to project base currency)
+  const totalExpenses = projectExpenses.reduce((sum, exp) => {
+    const expCurr = exp.currency || project.currency || 'SAR';
+    const inProjectCurr = convertTransactionAmount(exp.amount, expCurr, project.currency, exp.exchangeRate);
+    return sum + inProjectCurr;
+  }, 0);
   const approvedBudget = project.approvedBudget || 0;
   const budgetUsagePercent = approvedBudget > 0 ? (totalExpenses / approvedBudget) * 100 : 0;
   const budgetRemaining = approvedBudget > 0 ? approvedBudget - totalExpenses : 0;

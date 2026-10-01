@@ -37,7 +37,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
             تسجيل الدخول وتبديل الحساب
           </h2>
           <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
-            منظومة <strong className="text-slate-800 font-bold">Osboha Electric</strong> الموحدة للمقاولات الكهربائية، إدارة المشاريع والمخططات الهندسية، والرقابة المالية الذكية
+            منصة <strong className="text-slate-800 font-bold">Osboha Electric</strong> الموحدة لإدارة المشاريع والمالية والأرباح، والأعمال الكهربائية والرقابة الذكية
           </p>
           
           <div className="inline-flex items-center gap-1.5 px-3 py-1 mt-3 rounded-full bg-cyan-50 border border-cyan-200 text-cyan-800 text-xs font-semibold">

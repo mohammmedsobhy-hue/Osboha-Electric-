@@ -82,7 +82,19 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const handleProgressChange = (val: number) => {
     setProgress(val);
     if (val === 100) setStatus('completed');
-    else if (val > 0 && status === 'not_started') setStatus('in_progress');
+    else if (val > 0 && (status === 'not_started' || status === 'pending')) setStatus('in_progress');
+    else if (val === 0 && status === 'completed') setStatus('pending');
+  };
+
+  const handleStatusChange = (newStatus: TaskStatus) => {
+    setStatus(newStatus);
+    if (newStatus === 'completed') {
+      setProgress(100);
+    } else if ((newStatus === 'pending' || newStatus === 'not_started') && progress === 100) {
+      setProgress(0);
+    } else if (newStatus === 'in_progress' && progress === 0) {
+      setProgress(25);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -216,16 +228,17 @@ export const TaskModal: React.FC<TaskModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">حالة المهمة</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">تصنيف حالة المهمة</label>
             <select
               value={status}
-              onChange={e => setStatus(e.target.value as TaskStatus)}
+              onChange={e => handleStatusChange(e.target.value as TaskStatus)}
               className="w-full text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
             >
-              <option value="not_started">لم تبدأ بعد</option>
-              <option value="in_progress">قيد التنفيذ</option>
-              <option value="completed">مكتملة</option>
-              <option value="delayed">متأخرة عن الجدول</option>
+              <option value="pending">⏳ قيد الانتظار</option>
+              <option value="in_progress">⚡ قيد التنفيذ</option>
+              <option value="completed">✅ مكتملة (100%)</option>
+              <option value="delayed">⚠️ متأخرة عن الجدول</option>
+              <option value="on_hold">⏸️ معلقة / متوقفة</option>
             </select>
           </div>
         </div>

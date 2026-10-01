@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
-import { ClientPayment, ClientPaymentMethod } from '../../types';
-import { formatSAR, PAYMENT_METHOD_MAP } from '../../utils/formatters';
+import { ClientPayment, ClientPaymentMethod, Currency } from '../../types';
+import { formatCurrency, CURRENCY_INFO, convertTransactionAmount, PAYMENT_METHOD_MAP } from '../../utils/formatters';
+import { CurrencyExchangeField } from '../common/CurrencyExchangeField';
 
 interface ClientPaymentModalProps {
   isOpen: boolean;
@@ -23,6 +24,8 @@ export const ClientPaymentModal: React.FC<ClientPaymentModalProps> = ({
 
   const [paymentNumber, setPaymentNumber] = useState('');
   const [projectId, setProjectId] = useState('');
+  const [currency, setCurrency] = useState<Currency>('SAR');
+  const [exchangeRate, setExchangeRate] = useState<number>(1.0);
   const [invoiceId, setInvoiceId] = useState<string>('');
   const [amount, setAmount] = useState<number>(0);
   const [paymentDate, setPaymentDate] = useState('');
@@ -30,10 +33,18 @@ export const ClientPaymentModal: React.FC<ClientPaymentModalProps> = ({
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
 
+  const selectedProject = db.projects.find(p => p.id === projectId);
+  const projectCurrency = selectedProject?.currency || 'SAR';
+  const selectedClient = db.clients.find(c => c.id === selectedProject?.clientId);
+  const projectInvoices = db.invoices.filter(i => i.projectId === projectId);
+
   useEffect(() => {
     if (paymentToEdit) {
       setPaymentNumber(paymentToEdit.paymentNumber);
       setProjectId(paymentToEdit.projectId);
+      const prj = db.projects.find(p => p.id === paymentToEdit.projectId);
+      setCurrency(paymentToEdit.currency || prj?.currency || 'SAR');
+      setExchangeRate(paymentToEdit.exchangeRate || 1.0);
       setInvoiceId(paymentToEdit.invoiceId || '');
       setAmount(paymentToEdit.amount);
       setPaymentDate(paymentToEdit.paymentDate);
@@ -45,6 +56,9 @@ export const ClientPaymentModal: React.FC<ClientPaymentModalProps> = ({
       setPaymentNumber(`PAY-C-2026-${String(nextNum).padStart(2, '0')}`);
       const initialProject = defaultProjectId || db.projects[0]?.id || '';
       setProjectId(initialProject);
+      const prj = db.projects.find(p => p.id === initialProject);
+      setCurrency(prj?.currency || 'SAR');
+      setExchangeRate(1.0);
       setInvoiceId(defaultInvoiceId || '');
       setPaymentDate(new Date().toISOString().slice(0, 10));
       setPaymentMethod('bank_transfer');
@@ -58,6 +72,10 @@ export const ClientPaymentModal: React.FC<ClientPaymentModalProps> = ({
           const fin = getProjectFinancials(inv.projectId);
           const calculated = fin?.invoices.find(i => i.id === inv.id);
           setAmount(calculated?.remainingAmount ?? inv.totalAmount);
+          if (inv.currency) {
+            setCurrency(inv.currency);
+            if (inv.exchangeRate) setExchangeRate(inv.exchangeRate);
+          }
         }
       } else {
         setAmount(20000);
@@ -65,49 +83,64 @@ export const ClientPaymentModal: React.FC<ClientPaymentModalProps> = ({
     }
   }, [paymentToEdit, defaultProjectId, defaultInvoiceId, isOpen, db.clientPayments.length, db.projects]);
 
-  const selectedProject = db.projects.find(p => p.id === projectId);
-  const selectedClient = db.clients.find(c => c.id === selectedProject?.clientId);
-  const projectInvoices = db.invoices.filter(i => i.projectId === projectId);
-
   const handleInvoiceChange = (invId: string) => {
     setInvoiceId(invId);
     if (invId) {
+      const inv = db.invoices.find(i => i.id === invId);
       const fin = getProjectFinancials(projectId);
       const calculated = fin?.invoices.find(i => i.id === invId);
       if (calculated) {
         setAmount(calculated.remainingAmount);
       }
+      if (inv?.currency) {
+        setCurrency(inv.currency);
+        if (inv.exchangeRate) setExchangeRate(inv.exchangeRate);
+      }
     }
   };
+
+  const handleProjectChange = (newProjId: string) => {
+    setProjectId(newProjId);
+    setInvoiceId('');
+    if (!paymentToEdit) {
+      const prj = db.projects.find(p => p.id === newProjId);
+      if (prj) {
+        setCurrency(prj.currency || 'SAR');
+        setExchangeRate(1.0);
+      }
+    }
+  };
+
+  const currSymbol = CURRENCY_INFO[currency]?.symbol || currency;
+  const convertedAmountToProject = convertTransactionAmount(
+    amount,
+    currency,
+    projectCurrency,
+    exchangeRate
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProject || amount <= 0) return;
 
+    const payload = {
+      paymentNumber,
+      projectId,
+      clientId: selectedProject.clientId,
+      currency,
+      exchangeRate: currency === projectCurrency ? 1.0 : (Number(exchangeRate) || 1.0),
+      invoiceId: invoiceId || undefined,
+      amount: Number(amount) || 0,
+      paymentDate,
+      paymentMethod,
+      referenceNumber,
+      notes,
+    };
+
     if (paymentToEdit) {
-      updateClientPayment(paymentToEdit.id, {
-        paymentNumber,
-        projectId,
-        clientId: selectedProject.clientId,
-        invoiceId: invoiceId || undefined,
-        amount: Number(amount) || 0,
-        paymentDate,
-        paymentMethod,
-        referenceNumber,
-        notes,
-      });
+      updateClientPayment(paymentToEdit.id, payload);
     } else {
-      addClientPayment({
-        paymentNumber,
-        projectId,
-        clientId: selectedProject.clientId,
-        invoiceId: invoiceId || undefined,
-        amount: Number(amount) || 0,
-        paymentDate,
-        paymentMethod,
-        referenceNumber,
-        notes,
-      });
+      addClientPayment(payload);
     }
     onClose();
   };
@@ -156,26 +189,39 @@ export const ClientPaymentModal: React.FC<ClientPaymentModalProps> = ({
           <select
             required
             value={projectId}
-            onChange={e => {
-              setProjectId(e.target.value);
-              setInvoiceId('');
-            }}
+            onChange={e => handleProjectChange(e.target.value)}
             className="w-full text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
           >
             {db.projects.map(p => (
               <option key={p.id} value={p.id}>
-                {p.code} - {p.name}
+                {p.code} - {p.name} ({p.currency || 'SAR'})
               </option>
             ))}
           </select>
         </div>
 
         {selectedClient && (
-          <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
-            <span>العميل: </span>
-            <strong className="text-slate-900">{selectedClient.name}</strong>
+          <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 flex items-center justify-between">
+            <div>
+              <span>العميل: </span>
+              <strong className="text-slate-900">{selectedClient.name}</strong>
+            </div>
+            <span className="text-[11px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-mono">
+              عملة المشروع: {projectCurrency}
+            </span>
           </div>
         )}
+
+        {/* Currency & Exchange Rate Selector */}
+        <CurrencyExchangeField
+          selectedCurrency={currency}
+          onCurrencyChange={setCurrency}
+          projectCurrency={projectCurrency}
+          exchangeRate={exchangeRate}
+          onExchangeRateChange={setExchangeRate}
+          amount={amount}
+          transactionTypeLabel="الدفعة"
+        />
 
         <div>
           <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -190,10 +236,11 @@ export const ClientPaymentModal: React.FC<ClientPaymentModalProps> = ({
             {projectInvoices.map(inv => {
               const fin = getProjectFinancials(projectId);
               const calculated = fin?.invoices.find(i => i.id === inv.id);
+              const invCurr = inv.currency || projectCurrency;
               return (
                 <option key={inv.id} value={inv.id}>
-                  {inv.invoiceNumber} - إجمالي {formatSAR(inv.totalAmount)} (متبقي:{' '}
-                  {formatSAR(calculated?.remainingAmount ?? inv.totalAmount)})
+                  {inv.invoiceNumber} - إجمالي {formatCurrency(inv.totalAmount, invCurr)} (متبقي:{' '}
+                  {formatCurrency(calculated?.remainingAmount ?? inv.totalAmount, invCurr)})
                 </option>
               );
             })}
@@ -203,17 +250,22 @@ export const ClientPaymentModal: React.FC<ClientPaymentModalProps> = ({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              المبلغ المستلم (SAR) <span className="text-rose-500">*</span>
+              المبلغ المستلم ({currSymbol}) <span className="text-rose-500">*</span>
             </label>
             <input
               type="number"
-              min="1"
-              step="100"
+              min="0.01"
+              step="any"
               required
               value={amount}
               onChange={e => setAmount(Number(e.target.value))}
               className="w-full text-xs font-mono font-bold text-emerald-800 bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
             />
+            {currency !== projectCurrency && (
+              <span className="text-[10px] text-slate-500 block mt-1 font-mono">
+                يعادل: {formatCurrency(convertedAmountToProject, projectCurrency)}
+              </span>
+            )}
           </div>
 
           <div>

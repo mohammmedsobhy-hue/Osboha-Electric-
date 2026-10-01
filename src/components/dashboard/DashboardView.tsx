@@ -14,11 +14,15 @@ import {
   Plus,
   Eye,
   ExternalLink,
+  AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { StatCard } from '../common/StatCard';
 import { FinancialCharts } from './FinancialCharts';
 import { FilterBar } from './FilterBar';
+import { BudgetAlertsWidget } from './BudgetAlertsWidget';
+import { ProjectStatusSummaryWidget } from './ProjectStatusSummaryWidget';
+import { ProjectStatusTracker } from '../projects/ProjectStatusTracker';
 import {
   formatCurrency,
   formatSAR,
@@ -104,6 +108,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAction 
   const recentInvoices = [...db.invoices]
     .sort((a, b) => new Date(b.issueDate).getTime() - new Date(a.issueDate).getTime())
     .slice(0, 4);
+
+  // Budget Alerts Calculation (Approaching >=80% or Exceeded >=100%)
+  const budgetAlertsCount = db.projects.filter(p => {
+    if (!p.approvedBudget || p.approvedBudget <= 0) return false;
+    const fin = allProjectFinancials.get(p.id);
+    return (fin?.budgetUsagePercent || 0) >= 80;
+  }).length;
+
+  const hasCriticalBudgetAlert = db.projects.some(p => {
+    if (!p.approvedBudget || p.approvedBudget <= 0) return false;
+    const fin = allProjectFinancials.get(p.id);
+    return (fin?.budgetUsagePercent || 0) >= 100;
+  });
 
   // If role is team_member, render tailored personal portal
   if (currentUser.role === 'team_member') {
@@ -238,6 +255,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAction 
                         : formatSAR(pa.compensationValue)}
                     </span>
                   </div>
+                  {(() => {
+                    const projFin = allProjectFinancials.get(proj.id);
+                    if (proj.approvedBudget && projFin?.budgetUsagePercent && projFin.budgetUsagePercent >= 80) {
+                      return (
+                        <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
+                          <span className="flex items-center gap-1 font-semibold text-amber-800">
+                            <AlertTriangle className="w-3 h-3 text-amber-600" />
+                            <span>
+                              {projFin.isOverBudget ? 'تجاوز للميزانية' : 'اقتراب من سقف الميزانية'}
+                            </span>
+                          </span>
+                          <span className="font-mono font-bold text-amber-700">{projFin.budgetUsagePercent.toFixed(0)}%</span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
               );
             })}
@@ -306,6 +340,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAction 
 
       {/* Filter Bar */}
       <FilterBar />
+
+      {/* Budget & Expense Warning Alerts Widget */}
+      <BudgetAlertsWidget
+        projects={db.projects}
+        allProjectFinancials={allProjectFinancials}
+        clients={db.clients}
+        onSelectProject={setSelectedProjectId}
+        onOpenQuickAction={type => onOpenQuickAction(type as any)}
+      />
+
+      {/* Project Status Tracking & Workflow Distribution Widget */}
+      <ProjectStatusSummaryWidget onSelectProject={setSelectedProjectId} />
 
       {/* Primary KPI Grid (10 Core Metrics Required by Prompt) */}
       <div className="space-y-4">
@@ -395,7 +441,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAction 
             value={formatCurrency(overallFinancials.totalExpenses, reportCurrency)}
             subtitle="سيرفرات وتراخيص وغيرها"
             icon={Receipt}
-            variant="danger"
+            variant={hasCriticalBudgetAlert ? 'danger' : budgetAlertsCount > 0 ? 'warning' : 'default'}
+            badge={budgetAlertsCount > 0 ? `${budgetAlertsCount} تنبيه ميزانية` : undefined}
+            badgeType={hasCriticalBudgetAlert ? 'negative' : budgetAlertsCount > 0 ? 'warning' : undefined}
           />
 
           {/* 10. صافي الربح الفعلي */}
@@ -516,17 +564,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onOpenQuickAction 
                       {formatSAR(fin?.totalTeamPaid)}
                     </td>
                     <td className="py-3 px-3 font-mono text-rose-700">
-                      {formatSAR(fin?.totalExpenses)}
+                      <div>{formatSAR(fin?.totalExpenses)}</div>
+                      {project.approvedBudget && project.approvedBudget > 0 && (fin?.budgetUsagePercent || 0) >= 80 ? (
+                        <div className="mt-1">
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                              fin?.isOverBudget
+                                ? 'bg-rose-100 text-rose-800 border border-rose-200 animate-pulse'
+                                : 'bg-amber-100 text-amber-800 border border-amber-200'
+                            }`}
+                            title={
+                              fin?.isOverBudget
+                                ? `تجاوز الميزانية المعتمدة بنسبة ${fin.budgetUsagePercent.toFixed(1)}%`
+                                : `تحذير: اقتراب المصروفات من سقف الميزانية بنسبة ${fin?.budgetUsagePercent.toFixed(1)}%`
+                            }
+                          >
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            <span>{fin?.isOverBudget ? 'تجاوز' : 'اقتراب'} ({fin?.budgetUsagePercent.toFixed(0)}%)</span>
+                          </span>
+                        </div>
+                      ) : null}
                     </td>
                     <td className="py-3 px-3 font-mono font-bold">
                       <span className={(fin?.actualProfit || 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
                         {formatSAR(fin?.actualProfit)}
                       </span>
                     </td>
-                    <td className="py-3 px-3">
-                      <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${statusMeta.bgClass} ${statusMeta.textClass}`}>
-                        {statusMeta.label}
-                      </span>
+                    <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
+                      <ProjectStatusTracker project={project} compact={true} />
                     </td>
                     <td className="py-3 px-3 text-center">
                       <button

@@ -20,10 +20,16 @@ import {
   Wallet,
   CheckCircle2,
   AlertTriangle,
+  Edit,
+  Search,
 } from 'lucide-react';
+import { ProjectStatusTimeline, extractProjectMilestones } from './ProjectStatusTimeline';
+import { ProjectStatusTracker } from './ProjectStatusTracker';
 import { Modal } from '../common/Modal';
+import { TaskModal } from '../gantt/TaskModal';
 import { useApp } from '../../context/AppContext';
-import { formatSAR, formatCurrency, formatPercent, formatDate, PROJECT_STATUS_MAP, INVOICE_STATUS_MAP, EXPENSE_CATEGORY_MAP, PAYMENT_METHOD_MAP } from '../../utils/formatters';
+import { ProjectTask, TaskStatus } from '../../types';
+import { formatSAR, formatCurrency, formatPercent, formatDate, convertTransactionAmount, CURRENCY_INFO, PROJECT_STATUS_MAP, INVOICE_STATUS_MAP, EXPENSE_CATEGORY_MAP, PAYMENT_METHOD_MAP, TASK_STATUS_MAP, getTaskStatusInfo } from '../../utils/formatters';
 import { exportToExcel, exportDocumentToPDF } from '../../utils/exportService';
 
 interface ProjectDetailModalProps {
@@ -47,9 +53,13 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   onOpenCreateExpense,
   onPrintInvoice,
 }) => {
-  const { db, getProjectFinancials, deleteInvoice, deleteClientPayment, deleteTeamPayment, deleteExpense } = useApp();
-  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'invoices' | 'client-payments' | 'team' | 'expenses' | 'gantt'>('overview');
+  const { db, getProjectFinancials, deleteInvoice, deleteClientPayment, deleteTeamPayment, deleteExpense, updateTask, deleteTask, updateTaskProgress } = useApp();
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'timeline' | 'invoices' | 'client-payments' | 'team' | 'expenses' | 'gantt'>('overview');
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [taskStatusFilter, setTaskStatusFilter] = useState<'all' | TaskStatus>('all');
+  const [taskSearchQuery, setTaskSearchQuery] = useState('');
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [taskToEdit, setTaskToEdit] = useState<ProjectTask | null>(null);
 
   if (!projectId) return null;
 
@@ -60,6 +70,55 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   const fin = getProjectFinancials(projectId);
   const statusMeta = PROJECT_STATUS_MAP[project.status];
   const projectTasks = db.tasks.filter(t => t.projectId === projectId);
+  const projectMilestones = extractProjectMilestones(project, projectTasks, db.teamMembers, fin?.invoices);
+
+  // Task Status Classification Metrics & Calculations
+  const totalTasksCount = projectTasks.length;
+  const pendingTasksCount = projectTasks.filter(t => t.status === 'pending' || t.status === 'not_started').length;
+  const inProgressTasksCount = projectTasks.filter(t => t.status === 'in_progress').length;
+  const completedTasksCount = projectTasks.filter(t => t.status === 'completed' || t.progress === 100).length;
+  const delayedTasksCount = projectTasks.filter(t => t.status === 'delayed').length;
+  const onHoldTasksCount = projectTasks.filter(t => t.status === 'on_hold').length;
+  const tasksCompletionRate = totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
+
+  // Filtered tasks for the Tasks Tab
+  const filteredProjectTasks = projectTasks.filter(task => {
+    if (taskStatusFilter !== 'all') {
+      if (taskStatusFilter === 'pending') {
+        if (task.status !== 'pending' && task.status !== 'not_started') return false;
+      } else if (taskStatusFilter === 'completed') {
+        if (task.status !== 'completed' && task.progress !== 100) return false;
+      } else if (task.status !== taskStatusFilter) {
+        return false;
+      }
+    }
+    if (taskSearchQuery.trim()) {
+      const q = taskSearchQuery.toLowerCase().trim();
+      const titleMatch = task.title.toLowerCase().includes(q);
+      const noteMatch = task.notes ? task.notes.toLowerCase().includes(q) : false;
+      const member = db.teamMembers.find(m => m.id === task.assignedMemberId);
+      const memberMatch = member ? member.name.toLowerCase().includes(q) : false;
+      if (!titleMatch && !noteMatch && !memberMatch) return false;
+    }
+    return true;
+  });
+
+  const handleQuickStatusChange = (taskId: string, newStatus: TaskStatus) => {
+    const current = projectTasks.find(t => t.id === taskId);
+    if (!current) return;
+    let newProgress = current.progress;
+    if (newStatus === 'completed') {
+      newProgress = 100;
+    } else if ((newStatus === 'pending' || newStatus === 'not_started') && current.progress === 100) {
+      newProgress = 0;
+    } else if (newStatus === 'in_progress' && current.progress === 0) {
+      newProgress = 25;
+    }
+    updateTask(taskId, {
+      status: newStatus,
+      progress: newProgress,
+    });
+  };
 
   const handleExportProjectExcel = () => {
     // 1. Overview Sheet
@@ -130,8 +189,22 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
       exp.paymentMethod,
     ]);
 
+    // 6. Project Timeline & Milestones Sheet
+    const milestoneHeaders = ['اسم المحطة / المرحلة', 'التصنيف', 'تاريخ الاستحقاق', 'الفترة الزمنية', 'نسبة الإنجاز', 'الحالة', 'المسؤول', 'ملاحظات'];
+    const milestoneRows = projectMilestones.map(m => [
+      m.title,
+      m.typeLabel,
+      formatDate(m.date),
+      m.startDate && m.endDate ? `من ${formatDate(m.startDate)} إلى ${formatDate(m.endDate)}` : formatDate(m.date),
+      `${m.progress}%`,
+      m.status === 'completed' ? 'مكتملة' : m.status === 'delayed' ? 'متأخرة عن الموعد' : m.status === 'in_progress' ? 'قيد التنفيذ' : 'مرحلة قادمة',
+      m.assignedMemberName || '-',
+      m.notes || '-',
+    ]);
+
     exportToExcel(`تقرير_مشروع_${project.code}`, [
       { name: 'الملخص المالي', headers: overviewHeaders, rows: overviewRows },
+      { name: 'المسار الزمني والمحطات', headers: milestoneHeaders, rows: milestoneRows },
       { name: 'الفواتير', headers: invoiceHeaders, rows: invoiceRows },
       { name: 'دفعات العميل', headers: payHeaders, rows: payRows },
       { name: 'مستحقات الفريق', headers: teamHeaders, rows: teamRows },
@@ -180,9 +253,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
         {/* Top Summary Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
           <div className="flex items-center gap-2">
-            <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${statusMeta.bgClass} ${statusMeta.textClass}`}>
-              {statusMeta.label}
-            </span>
+            <ProjectStatusTracker project={project} compact={true} />
             <span className="text-xs text-slate-500 font-mono">
               من {formatDate(project.startDate)} إلى {formatDate(project.endDate)}
             </span>
@@ -542,6 +613,19 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             نظرة عامة والربحية
           </button>
           <button
+            onClick={() => setActiveSubTab('timeline')}
+            className={`px-3.5 py-2 rounded-t-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeSubTab === 'timeline'
+                ? 'border-b-2 border-emerald-600 text-emerald-700 bg-emerald-50/40'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span>مسار حالة المشروع والمحطات</span>
+            <span className="px-1.5 py-0.2 bg-slate-200 rounded text-[10px] font-mono">
+              {projectMilestones.length}
+            </span>
+          </button>
+          <button
             onClick={() => setActiveSubTab('invoices')}
             className={`px-3.5 py-2 rounded-t-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
               activeSubTab === 'invoices'
@@ -597,14 +681,17 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             onClick={() => setActiveSubTab('gantt')}
             className={`px-3.5 py-2 rounded-t-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
               activeSubTab === 'gantt'
-                ? 'border-b-2 border-emerald-600 text-emerald-700 bg-emerald-50/40'
+                ? 'border-b-2 border-emerald-600 text-emerald-700 bg-emerald-50/40 font-bold'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <span>مخطط المهام وجانت</span>
+            <span>تصنيف ومهام المشروع</span>
             <span className="px-1.5 py-0.2 bg-slate-200 rounded text-[10px] font-mono">
               {projectTasks.length}
             </span>
+            {pendingTasksCount > 0 && (
+              <span className="w-2 h-2 rounded-full bg-amber-500" title={`يوجد ${pendingTasksCount} مهام قيد الانتظار`} />
+            )}
           </button>
         </div>
 
@@ -617,6 +704,187 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                 <p>{project.description}</p>
               </div>
             )}
+
+            {/* Project Status Lifecycle & Workflow Tracker */}
+            <ProjectStatusTracker project={project} compact={false} />
+
+            {/* Project Status & Key Milestones Timeline Visualization */}
+            <ProjectStatusTimeline
+              project={project}
+              tasks={db.tasks}
+              teamMembers={db.teamMembers}
+              invoices={fin?.invoices}
+              onNavigateToGantt={() => setActiveSubTab('gantt')}
+              onNavigateToInvoices={() => setActiveSubTab('invoices')}
+            />
+
+            {/* Project Task Status Classification & Completion Summary Widget */}
+            <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-3 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs sm:text-sm font-bold text-slate-900">
+                      مؤشرات تصنيف وإنجاز مهام المشروع
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                      {tasksCompletionRate}% مكتمل
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    توزيع مهام المشروع بحسب حالات التنفيذ (قيد الانتظار، قيد التنفيذ، مكتملة، معلقة، متأخرة)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('gantt')}
+                  className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 self-start sm:self-auto bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors border border-emerald-200"
+                >
+                  <span>استعراض وتصنيف المهام ({totalTasksCount})</span>
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {totalTasksCount > 0 ? (
+                <div className="space-y-3">
+                  {/* Visual Status Breakdown Bar */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-[11px] text-slate-600 font-mono">
+                      <span>إجمالي المهام المجدولة: {totalTasksCount} مهمة</span>
+                      <span className="font-bold text-emerald-700">{completedTasksCount} منجز من {totalTasksCount}</span>
+                    </div>
+                    <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
+                      {completedTasksCount > 0 && (
+                        <div
+                          className="bg-emerald-500 transition-all duration-300"
+                          style={{ width: `${(completedTasksCount / totalTasksCount) * 100}%` }}
+                          title={`مكتملة: ${completedTasksCount}`}
+                        />
+                      )}
+                      {inProgressTasksCount > 0 && (
+                        <div
+                          className="bg-blue-500 transition-all duration-300"
+                          style={{ width: `${(inProgressTasksCount / totalTasksCount) * 100}%` }}
+                          title={`قيد التنفيذ: ${inProgressTasksCount}`}
+                        />
+                      )}
+                      {pendingTasksCount > 0 && (
+                        <div
+                          className="bg-amber-400 transition-all duration-300"
+                          style={{ width: `${(pendingTasksCount / totalTasksCount) * 100}%` }}
+                          title={`قيد الانتظار: ${pendingTasksCount}`}
+                        />
+                      )}
+                      {delayedTasksCount > 0 && (
+                        <div
+                          className="bg-rose-500 transition-all duration-300"
+                          style={{ width: `${(delayedTasksCount / totalTasksCount) * 100}%` }}
+                          title={`متأخرة: ${delayedTasksCount}`}
+                        />
+                      )}
+                      {onHoldTasksCount > 0 && (
+                        <div
+                          className="bg-slate-400 transition-all duration-300"
+                          style={{ width: `${(onHoldTasksCount / totalTasksCount) * 100}%` }}
+                          title={`معلقة: ${onHoldTasksCount}`}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 5 Status Cards Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskStatusFilter('pending');
+                        setActiveSubTab('gantt');
+                      }}
+                      className="p-2.5 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-100 transition-colors text-right flex flex-col justify-between"
+                    >
+                      <div className="flex items-center justify-between text-amber-900 text-[11px] font-bold">
+                        <span>⏳ قيد الانتظار</span>
+                        <span className="font-mono text-sm">{pendingTasksCount}</span>
+                      </div>
+                      <div className="text-[10px] text-amber-700 mt-1">
+                        {totalTasksCount > 0 ? ((pendingTasksCount / totalTasksCount) * 100).toFixed(0) : 0}% من إجمالي المهام
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskStatusFilter('in_progress');
+                        setActiveSubTab('gantt');
+                      }}
+                      className="p-2.5 rounded-lg border border-blue-200 bg-blue-50/70 hover:bg-blue-100 transition-colors text-right flex flex-col justify-between"
+                    >
+                      <div className="flex items-center justify-between text-blue-900 text-[11px] font-bold">
+                        <span>⚡ قيد التنفيذ</span>
+                        <span className="font-mono text-sm">{inProgressTasksCount}</span>
+                      </div>
+                      <div className="text-[10px] text-blue-700 mt-1">
+                        {totalTasksCount > 0 ? ((inProgressTasksCount / totalTasksCount) * 100).toFixed(0) : 0}% من إجمالي المهام
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskStatusFilter('completed');
+                        setActiveSubTab('gantt');
+                      }}
+                      className="p-2.5 rounded-lg border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100 transition-colors text-right flex flex-col justify-between"
+                    >
+                      <div className="flex items-center justify-between text-emerald-900 text-[11px] font-bold">
+                        <span>✅ مكتملة</span>
+                        <span className="font-mono text-sm">{completedTasksCount}</span>
+                      </div>
+                      <div className="text-[10px] text-emerald-700 mt-1">
+                        {totalTasksCount > 0 ? ((completedTasksCount / totalTasksCount) * 100).toFixed(0) : 0}% من إجمالي المهام
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskStatusFilter('delayed');
+                        setActiveSubTab('gantt');
+                      }}
+                      className="p-2.5 rounded-lg border border-rose-200 bg-rose-50/70 hover:bg-rose-100 transition-colors text-right flex flex-col justify-between"
+                    >
+                      <div className="flex items-center justify-between text-rose-900 text-[11px] font-bold">
+                        <span>⚠️ متأخرة</span>
+                        <span className="font-mono text-sm">{delayedTasksCount}</span>
+                      </div>
+                      <div className="text-[10px] text-rose-700 mt-1">
+                        {totalTasksCount > 0 ? ((delayedTasksCount / totalTasksCount) * 100).toFixed(0) : 0}% من إجمالي المهام
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskStatusFilter('on_hold');
+                        setActiveSubTab('gantt');
+                      }}
+                      className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors text-right flex flex-col justify-between col-span-2 sm:col-span-1"
+                    >
+                      <div className="flex items-center justify-between text-slate-800 text-[11px] font-bold">
+                        <span>⏸️ معلقة / متوقفة</span>
+                        <span className="font-mono text-sm">{onHoldTasksCount}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-600 mt-1">
+                        {totalTasksCount > 0 ? ((onHoldTasksCount / totalTasksCount) * 100).toFixed(0) : 0}% من إجمالي المهام
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 text-center text-xs text-slate-500 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                  لم يتم جدولة مهام بعد لهذا المشروع. اضغط على زر "استعراض وتصنيف المهام" للبدء في إضافة مهام ومراحل التنفيذ.
+                </div>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Financial Calculation Statement */}
@@ -712,6 +980,20 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
           </div>
         )}
 
+        {/* Tab: Dedicated Timeline Visualization */}
+        {activeSubTab === 'timeline' && (
+          <div className="space-y-4">
+            <ProjectStatusTimeline
+              project={project}
+              tasks={db.tasks}
+              teamMembers={db.teamMembers}
+              invoices={fin?.invoices}
+              onNavigateToGantt={() => setActiveSubTab('gantt')}
+              onNavigateToInvoices={() => setActiveSubTab('invoices')}
+            />
+          </div>
+        )}
+
         {/* Tab 2: Invoices */}
         {activeSubTab === 'invoices' && (
           <div className="space-y-3">
@@ -737,6 +1019,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                   <thead className="bg-slate-50 text-slate-600 border-b">
                     <tr>
                       <th className="py-2.5 px-3">رقم الفاتورة</th>
+                      <th className="py-2.5 px-3">العملة</th>
                       <th className="py-2.5 px-3">تاريخ الإصدار</th>
                       <th className="py-2.5 px-3">تاريخ الاستحقاق</th>
                       <th className="py-2.5 px-3">قيمة الفاتورة</th>
@@ -752,11 +1035,41 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                       return (
                         <tr key={inv.id} className="hover:bg-slate-50/60">
                           <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{inv.invoiceNumber}</td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {(() => {
+                              const curr = inv.currency || project.currency;
+                              const info = CURRENCY_INFO[curr];
+                              return (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                                  <span>{info?.flag || '🌐'}</span>
+                                  <span className="font-mono">{curr}</span>
+                                </span>
+                              );
+                            })()}
+                          </td>
                           <td className="py-2.5 px-3 font-mono text-slate-600">{formatDate(inv.issueDate)}</td>
                           <td className="py-2.5 px-3 font-mono text-slate-600">{formatDate(inv.dueDate)}</td>
-                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{formatSAR(inv.totalAmount)}</td>
-                          <td className="py-2.5 px-3 font-mono text-emerald-700">{formatSAR(inv.paidAmount)}</td>
-                          <td className="py-2.5 px-3 font-mono text-amber-700">{formatSAR(inv.remainingAmount)}</td>
+                          {(() => {
+                            const invCurr = inv.currency || project.currency;
+                            const isDiff = invCurr !== project.currency;
+                            const convertedTotal = isDiff
+                              ? convertTransactionAmount(inv.totalAmount, invCurr, project.currency, inv.exchangeRate)
+                              : inv.totalAmount;
+                            return (
+                              <>
+                                <td className="py-2.5 px-3 font-mono font-bold text-slate-900">
+                                  <div>{formatCurrency(inv.totalAmount, invCurr)}</div>
+                                  {isDiff && (
+                                    <div className="text-[10px] text-slate-500 font-sans font-normal mt-0.5">
+                                      يعادل: {formatCurrency(convertedTotal, project.currency)}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-emerald-700">{formatCurrency(inv.paidAmount, invCurr)}</td>
+                                <td className="py-2.5 px-3 font-mono text-amber-700">{formatCurrency(inv.remainingAmount, invCurr)}</td>
+                              </>
+                            );
+                          })()}
                           <td className="py-2.5 px-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${statusMeta.bgClass} ${statusMeta.textClass}`}>
                               {statusMeta.label}
@@ -815,6 +1128,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                   <thead className="bg-slate-50 text-slate-600 border-b">
                     <tr>
                       <th className="py-2.5 px-3">رقم الدفعة</th>
+                      <th className="py-2.5 px-3">العملة</th>
                       <th className="py-2.5 px-3">تاريخ الاستلام</th>
                       <th className="py-2.5 px-3">طريقة الدفع</th>
                       <th className="py-2.5 px-3">رقم المرجع / الحوالة</th>
@@ -827,10 +1141,38 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                     {fin?.clientPayments.map(cp => (
                       <tr key={cp.id} className="hover:bg-slate-50/60">
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{cp.paymentNumber}</td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          {(() => {
+                            const curr = cp.currency || project.currency;
+                            const info = CURRENCY_INFO[curr];
+                            return (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                                <span>{info?.flag || '🌐'}</span>
+                                <span className="font-mono">{curr}</span>
+                              </span>
+                            );
+                          })()}
+                        </td>
                         <td className="py-2.5 px-3 font-mono text-slate-600">{formatDate(cp.paymentDate)}</td>
                         <td className="py-2.5 px-3 text-slate-700">{PAYMENT_METHOD_MAP[cp.paymentMethod] || cp.paymentMethod}</td>
                         <td className="py-2.5 px-3 font-mono text-slate-500">{cp.referenceNumber || '-'}</td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">+{formatSAR(cp.amount)}</td>
+                        {(() => {
+                          const cpCurr = cp.currency || project.currency;
+                          const isDiff = cpCurr !== project.currency;
+                          const converted = isDiff
+                            ? convertTransactionAmount(cp.amount, cpCurr, project.currency, cp.exchangeRate)
+                            : cp.amount;
+                          return (
+                            <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">
+                              <div>+{formatCurrency(cp.amount, cpCurr)}</div>
+                              {isDiff && (
+                                <div className="text-[10px] text-slate-500 font-sans font-normal mt-0.5">
+                                  يعادل: {formatCurrency(converted, project.currency)}
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })()}
                         <td className="py-2.5 px-3 text-slate-500">{cp.notes || '-'}</td>
                         <td className="py-2.5 px-3 text-center">
                           <button
@@ -932,6 +1274,16 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                       >
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-slate-500 font-semibold">{tp.paymentNumber}</span>
+                          {(() => {
+                            const curr = tp.currency || project.currency;
+                            const info = CURRENCY_INFO[curr];
+                            return (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                                <span>{info?.flag || '🌐'}</span>
+                                <span className="font-mono">{curr}</span>
+                              </span>
+                            );
+                          })()}
                           <span className="font-semibold text-slate-800">{member?.name}</span>
                           <span className="text-slate-400">·</span>
                           <span className="text-slate-500">{formatDate(tp.paymentDate)}</span>
@@ -940,7 +1292,23 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-amber-700">-{formatSAR(tp.amount)}</span>
+                          {(() => {
+                            const tpCurr = tp.currency || project.currency;
+                            const isDiff = tpCurr !== project.currency;
+                            const converted = isDiff
+                              ? convertTransactionAmount(tp.amount, tpCurr, project.currency, tp.exchangeRate)
+                              : tp.amount;
+                            return (
+                              <span className="font-mono font-bold text-amber-700">
+                                -{formatCurrency(tp.amount, tpCurr)}
+                                {isDiff && (
+                                  <span className="text-[10px] text-slate-500 font-sans font-normal mr-1">
+                                    (يعادل: {formatCurrency(converted, project.currency)})
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })()}
                           <button
                             type="button"
                             onClick={() => deleteTeamPayment(tp.id)}
@@ -1033,6 +1401,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                   <thead className="bg-slate-50 text-slate-600 border-b">
                     <tr>
                       <th className="py-2.5 px-3">رقم المصروف</th>
+                      <th className="py-2.5 px-3">العملة</th>
                       <th className="py-2.5 px-3">التاريخ</th>
                       <th className="py-2.5 px-3">نوع المصروف</th>
                       <th className="py-2.5 px-3">الوصف</th>
@@ -1045,11 +1414,39 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                     {fin?.expenses.map(exp => (
                       <tr key={exp.id} className="hover:bg-slate-50/60">
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{exp.expenseNumber}</td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          {(() => {
+                            const curr = exp.currency || project.currency;
+                            const info = CURRENCY_INFO[curr];
+                            return (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                                <span>{info?.flag || '🌐'}</span>
+                                <span className="font-mono">{curr}</span>
+                              </span>
+                            );
+                          })()}
+                        </td>
                         <td className="py-2.5 px-3 font-mono text-slate-600">{formatDate(exp.expenseDate)}</td>
                         <td className="py-2.5 px-3 text-slate-700">{EXPENSE_CATEGORY_MAP[exp.category]}</td>
                         <td className="py-2.5 px-3 text-slate-700">{exp.description}</td>
                         <td className="py-2.5 px-3 text-slate-600 font-medium">{exp.vendor}</td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-rose-700">-{formatSAR(exp.amount)}</td>
+                        {(() => {
+                          const expCurr = exp.currency || project.currency;
+                          const isDiff = expCurr !== project.currency;
+                          const converted = isDiff
+                            ? convertTransactionAmount(exp.amount, expCurr, project.currency, exp.exchangeRate)
+                            : exp.amount;
+                          return (
+                            <td className="py-2.5 px-3 font-mono font-bold text-rose-700">
+                              <div>-{formatCurrency(exp.amount, expCurr)}</div>
+                              {isDiff && (
+                                <div className="text-[10px] text-slate-500 font-sans font-normal mt-0.5">
+                                  يعادل: {formatCurrency(converted, project.currency)}
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })()}
                         <td className="py-2.5 px-3 text-center">
                           <button
                             type="button"
@@ -1068,76 +1465,306 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             )}
           </div>
         )}
-        {/* Tab 6: Gantt & Tasks */}
+        {/* Tab 6: Tasks Management & Status Classification */}
         {activeSubTab === 'gantt' && (
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
+            {/* Header with Title and Add Task Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 border border-slate-200 rounded-xl shadow-2xs">
               <div>
-                <span className="text-xs font-bold text-slate-900 block">مهام ومراحل المشروع المجدولة</span>
-                <span className="text-[11px] text-slate-500">متابعة الإنجاز، التبعيات، والمهام المتأخرة</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-bold text-slate-900">
+                    إدارة وتصنيف مهام المشروع ({projectTasks.length})
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    معدل الإنجاز: {tasksCompletionRate}%
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  تصنيف مهام المشروع حسب حالات العمل (قيد الانتظار، قيد التنفيذ، مكتملة، معلقة، متأخرة) مع التحكم السريع
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setTaskToEdit(null);
+                  setIsTaskModalOpen(true);
+                }}
+                className="px-3.5 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors flex items-center gap-1.5 self-start sm:self-auto shadow-2xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>إضافة مهمة جديدة</span>
+              </button>
+            </div>
+
+            {/* Filter Pills and Search */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setTaskStatusFilter('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    taskStatusFilter === 'all'
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>كافة المهام</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    taskStatusFilter === 'all' ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {totalTasksCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTaskStatusFilter('pending')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    taskStatusFilter === 'pending'
+                      ? 'bg-amber-600 text-white shadow-2xs'
+                      : 'bg-amber-50 border border-amber-200 text-amber-900 hover:bg-amber-100'
+                  }`}
+                >
+                  <span>⏳ قيد الانتظار</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    taskStatusFilter === 'pending' ? 'bg-amber-700 text-amber-100' : 'bg-amber-200 text-amber-900'
+                  }`}>
+                    {pendingTasksCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTaskStatusFilter('in_progress')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    taskStatusFilter === 'in_progress'
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'bg-blue-50 border border-blue-200 text-blue-900 hover:bg-blue-100'
+                  }`}
+                >
+                  <span>⚡ قيد التنفيذ</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    taskStatusFilter === 'in_progress' ? 'bg-blue-700 text-blue-100' : 'bg-blue-200 text-blue-900'
+                  }`}>
+                    {inProgressTasksCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTaskStatusFilter('completed')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    taskStatusFilter === 'completed'
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'bg-emerald-50 border border-emerald-200 text-emerald-900 hover:bg-emerald-100'
+                  }`}
+                >
+                  <span>✅ مكتملة</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    taskStatusFilter === 'completed' ? 'bg-emerald-700 text-emerald-100' : 'bg-emerald-200 text-emerald-900'
+                  }`}>
+                    {completedTasksCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTaskStatusFilter('delayed')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    taskStatusFilter === 'delayed'
+                      ? 'bg-rose-600 text-white shadow-2xs'
+                      : 'bg-rose-50 border border-rose-200 text-rose-900 hover:bg-rose-100'
+                  }`}
+                >
+                  <span>⚠️ متأخرة</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    taskStatusFilter === 'delayed' ? 'bg-rose-700 text-rose-100' : 'bg-rose-200 text-rose-900'
+                  }`}>
+                    {delayedTasksCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTaskStatusFilter('on_hold')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    taskStatusFilter === 'on_hold'
+                      ? 'bg-slate-700 text-white shadow-2xs'
+                      : 'bg-slate-100 border border-slate-300 text-slate-800 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>⏸️ معلقة</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    taskStatusFilter === 'on_hold' ? 'bg-slate-800 text-slate-100' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    {onHoldTasksCount}
+                  </span>
+                </button>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative min-w-[200px] w-full md:w-56">
+                <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="بحث في مهام المشروع..."
+                  value={taskSearchQuery}
+                  onChange={e => setTaskSearchQuery(e.target.value)}
+                  className="w-full text-xs pr-8 pl-3 py-1.5 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+                />
               </div>
             </div>
 
-            {projectTasks.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-lg">
-                لا توجد مهام مسجلة لهذا المشروع في مخطط جانت
+            {/* Tasks List */}
+            {filteredProjectTasks.length === 0 ? (
+              <div className="p-10 text-center text-xs text-slate-500 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
+                <p>
+                  {taskSearchQuery || taskStatusFilter !== 'all'
+                    ? 'لا توجد مهام مطابقة لخيارات الفلترة المحددة.'
+                    : 'لا توجد مهام مسجلة لهذا المشروع بعد.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTaskToEdit(null);
+                    setIsTaskModalOpen(true);
+                  }}
+                  className="px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors inline-flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>إضافة المهمة الأولى للمشروع</span>
+                </button>
               </div>
             ) : (
-              <div className="space-y-2">
-                {projectTasks.map(task => {
+              <div className="space-y-2.5">
+                {filteredProjectTasks.map(task => {
                   const member = db.teamMembers.find(m => m.id === task.assignedMemberId);
-                  const isCompleted = task.progress === 100;
+                  const isCompleted = task.status === 'completed' || task.progress === 100;
+                  const isPending = task.status === 'pending' || task.status === 'not_started';
                   const isDelayed = task.status === 'delayed';
+                  const isOnHold = task.status === 'on_hold';
+                  const isInProgress = task.status === 'in_progress';
+                  const statusInfo = getTaskStatusInfo(task.status);
 
                   return (
                     <div
                       key={task.id}
-                      className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-3 text-xs"
+                      className={`p-3.5 bg-white border rounded-xl shadow-2xs transition-all hover:border-slate-300 ${
+                        isCompleted
+                          ? 'border-emerald-200/90 bg-emerald-50/20'
+                          : isDelayed
+                          ? 'border-rose-200/90 bg-rose-50/20'
+                          : isInProgress
+                          ? 'border-blue-200/90 bg-blue-50/20'
+                          : isOnHold
+                          ? 'border-slate-300 bg-slate-50/40'
+                          : 'border-amber-200/90 bg-amber-50/20'
+                      }`}
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-900 truncate">{task.title}</span>
-                          {isCompleted ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
-                              مكتملة
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        {/* Task Info & Badges */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-slate-900 text-xs sm:text-sm">{task.title}</span>
+
+                            {/* Status Classification Badge */}
+                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border flex items-center gap-1.5 shadow-2xs ${statusInfo.badgeClass}`}>
+                              <span className={`w-2 h-2 rounded-full ${statusInfo.dotClass}`} />
+                              <span>{statusInfo.emoji} {statusInfo.label}</span>
                             </span>
-                          ) : isDelayed ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-800">
-                              متأخرة عن الجدول
+
+                            {task.isMilestone && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                محطة فارقة (Milestone)
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Secondary Details */}
+                          <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-2 flex-wrap">
+                            <span className="flex items-center gap-1 font-mono">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                              <span>من {formatDate(task.startDate)} إلى {formatDate(task.endDate)}</span>
+                              <span className="text-slate-400 font-bold">({task.durationDays} يوم)</span>
                             </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800">
-                              قيد التنفيذ ({task.progress}%)
-                            </span>
-                          )}
-                          {task.isMilestone && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
-                              علامة فارقة
-                            </span>
-                          )}
+
+                            {member && (
+                              <span className="flex items-center gap-1 text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-[10px] font-medium">
+                                <Users className="w-3 h-3 text-slate-500" />
+                                <span>المسؤول: {member.name} ({member.role})</span>
+                              </span>
+                            )}
+
+                            {task.notes && (
+                              <span className="text-slate-500 truncate max-w-xs" title={task.notes}>
+                                ملاحظة: {task.notes}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-1">
-                          <span className="font-mono">
-                            من {formatDate(task.startDate)} إلى {formatDate(task.endDate)} ({task.durationDays} يوم)
-                          </span>
-                          {member && (
-                            <>
-                              <span>·</span>
-                              <span>المسؤول: {member.name}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
+                        {/* Quick Status Changer + Progress Bar + Actions */}
+                        <div className="flex items-center gap-3 shrink-0 self-end md:self-center">
+                          {/* Quick Status Classification Selector */}
+                          <div className="flex flex-col items-end">
+                            <span className="text-[10px] text-slate-400 mb-0.5">تحديث الحالة:</span>
+                            <select
+                              value={task.status === 'not_started' ? 'pending' : task.status}
+                              onChange={e => handleQuickStatusChange(task.id, e.target.value as TaskStatus)}
+                              className="text-xs font-semibold px-2 py-1 bg-white border border-slate-300 rounded-lg shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                              title="تغيير تصنيف حالة المهمة فورياً"
+                            >
+                              <option value="pending">⏳ قيد الانتظار</option>
+                              <option value="in_progress">⚡ قيد التنفيذ</option>
+                              <option value="completed">✅ مكتملة (100%)</option>
+                              <option value="delayed">⚠️ متأخرة عن الجدول</option>
+                              <option value="on_hold">⏸️ معلقة / متوقفة</option>
+                            </select>
+                          </div>
 
-                      {/* Progress visual */}
-                      <div className="w-28 shrink-0 text-left">
-                        <div className="text-[10px] font-mono text-slate-600 mb-1">{task.progress}%</div>
-                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full ${isCompleted ? 'bg-emerald-600' : isDelayed ? 'bg-rose-600' : 'bg-blue-600'}`}
-                            style={{ width: `${task.progress}%` }}
-                          />
+                          {/* Progress Slider / Counter */}
+                          <div className="w-28 text-left">
+                            <div className="flex justify-between items-center text-[10px] text-slate-600 mb-1">
+                              <span>الإنجاز:</span>
+                              <span className="font-mono font-bold text-slate-800">{task.progress}%</span>
+                            </div>
+                            <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full transition-all duration-300 ${
+                                  isCompleted ? 'bg-emerald-500' : isDelayed ? 'bg-rose-500' : isInProgress ? 'bg-blue-500' : isOnHold ? 'bg-slate-400' : 'bg-amber-400'
+                                }`}
+                                style={{ width: `${task.progress}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Action buttons */}
+                          <div className="flex items-center gap-1 border-r border-slate-200 pr-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTaskToEdit(task);
+                                setIsTaskModalOpen(true);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-slate-800 rounded-md hover:bg-slate-100 transition-colors"
+                              title="تعديل تفاصيل المهمة"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`هل أنت متأكد من حذف المهمة "${task.title}"؟`)) {
+                                  deleteTask(task.id);
+                                }
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 transition-colors"
+                              title="حذف المهمة"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1148,6 +1775,19 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
           </div>
         )}
       </div>
+
+      {/* Task Modal for Editing or Adding Tasks for this project */}
+      {isTaskModalOpen && (
+        <TaskModal
+          isOpen={isTaskModalOpen}
+          onClose={() => {
+            setIsTaskModalOpen(false);
+            setTaskToEdit(null);
+          }}
+          defaultProjectId={project.id}
+          taskToEdit={taskToEdit}
+        />
+      )}
     </Modal>
   );
 };

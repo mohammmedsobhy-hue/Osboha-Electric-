@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Invoice, InvoiceStatus } from '../../types';
-import { formatSAR, formatDate, INVOICE_STATUS_MAP } from '../../utils/formatters';
+import { formatSAR, formatCurrency, convertTransactionAmount, CURRENCY_INFO, formatDate, INVOICE_STATUS_MAP } from '../../utils/formatters';
 import { exportInvoicesData } from '../../utils/exportService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { StatCard } from '../common/StatCard';
@@ -279,6 +279,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
                 <tr>
                   <th className="py-3 px-3.5">رقم الفاتورة</th>
+                  <th className="py-3 px-3.5">العملة</th>
                   <th className="py-3 px-3.5">المشروع</th>
                   <th className="py-3 px-3.5">العميل</th>
                   <th className="py-3 px-3.5">تاريخ الإصدار</th>
@@ -299,6 +300,19 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
                       <td className="py-3 px-3.5 font-mono font-bold text-slate-900">
                         {invoice.invoiceNumber}
                       </td>
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        {(() => {
+                          const curr = invoice.currency || project?.currency || 'SAR';
+                          const info = CURRENCY_INFO[curr];
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                              <span>{info?.flag || '🌐'}</span>
+                              <span className="font-mono">{curr}</span>
+                              <span className="text-slate-500 font-normal text-[10px]">({info?.symbol || curr})</span>
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="py-3 px-3.5 font-medium text-slate-800">
                         {project ? (
                           <button
@@ -314,15 +328,32 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
                       <td className="py-3 px-3.5 text-slate-600">{client?.name || '-'}</td>
                       <td className="py-3 px-3.5 font-mono text-slate-600">{formatDate(invoice.issueDate)}</td>
                       <td className="py-3 px-3.5 font-mono text-slate-600">{formatDate(invoice.dueDate)}</td>
-                      <td className="py-3 px-3.5 font-mono font-bold text-slate-900">
-                        {formatSAR(invoice.totalAmount)}
-                      </td>
-                      <td className="py-3 px-3.5 font-mono font-semibold text-emerald-700">
-                        {formatSAR(paidAmount)}
-                      </td>
-                      <td className="py-3 px-3.5 font-mono font-semibold text-amber-700">
-                        {formatSAR(remainingAmount)}
-                      </td>
+                      {(() => {
+                        const invCurr = invoice.currency || project?.currency || 'SAR';
+                        const isDiff = project && invCurr !== project.currency;
+                        const convertedTotal = isDiff
+                          ? convertTransactionAmount(invoice.totalAmount, invCurr, project.currency, invoice.exchangeRate)
+                          : invoice.totalAmount;
+
+                        return (
+                          <>
+                            <td className="py-3 px-3.5 font-mono font-bold text-slate-900">
+                              <div>{formatCurrency(invoice.totalAmount, invCurr)}</div>
+                              {isDiff && (
+                                <div className="text-[10px] text-slate-500 font-sans font-normal mt-0.5">
+                                  يعادل: {formatCurrency(convertedTotal, project.currency)}
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3 px-3.5 font-mono font-semibold text-emerald-700">
+                              {formatCurrency(paidAmount, invCurr)}
+                            </td>
+                            <td className="py-3 px-3.5 font-mono font-semibold text-amber-700">
+                              {formatCurrency(remainingAmount, invCurr)}
+                            </td>
+                          </>
+                        );
+                      })()}
                       <td className="py-3 px-3.5">
                         <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${statusMeta.bgClass} ${statusMeta.textClass}`}>
                           {statusMeta.label}

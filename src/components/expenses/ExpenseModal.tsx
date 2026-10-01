@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
-import { ProjectExpense, ExpenseCategory, ExpensePaymentMethod } from '../../types';
-import { formatSAR, EXPENSE_CATEGORY_MAP } from '../../utils/formatters';
+import { ProjectExpense, ExpenseCategory, ExpensePaymentMethod, Currency } from '../../types';
+import { formatCurrency, CURRENCY_INFO, convertTransactionAmount, EXPENSE_CATEGORY_MAP } from '../../utils/formatters';
+import { CurrencyExchangeField } from '../common/CurrencyExchangeField';
 
 interface ExpenseModalProps {
   isOpen: boolean;
@@ -21,6 +22,8 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
 
   const [expenseNumber, setExpenseNumber] = useState('');
   const [projectId, setProjectId] = useState('');
+  const [currency, setCurrency] = useState<Currency>('SAR');
+  const [exchangeRate, setExchangeRate] = useState<number>(1.0);
   const [category, setCategory] = useState<ExpenseCategory>('software_servers');
   const [description, setDescription] = useState('');
   const [vendor, setVendor] = useState('');
@@ -29,10 +32,16 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<ExpensePaymentMethod>('credit_card');
   const [receiptReference, setReceiptReference] = useState('');
 
+  const selectedProject = db.projects.find(p => p.id === projectId);
+  const projectCurrency = selectedProject?.currency || 'SAR';
+
   useEffect(() => {
     if (expenseToEdit) {
       setExpenseNumber(expenseToEdit.expenseNumber);
       setProjectId(expenseToEdit.projectId);
+      const prj = db.projects.find(p => p.id === expenseToEdit.projectId);
+      setCurrency(expenseToEdit.currency || prj?.currency || 'SAR');
+      setExchangeRate(expenseToEdit.exchangeRate || 1.0);
       setCategory(expenseToEdit.category);
       setDescription(expenseToEdit.description);
       setVendor(expenseToEdit.vendor);
@@ -43,7 +52,11 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     } else {
       const nextNum = db.expenses.length + 1;
       setExpenseNumber(`EXP-2026-${String(nextNum).padStart(2, '0')}`);
-      setProjectId(defaultProjectId || db.projects[0]?.id || '');
+      const initialProjId = defaultProjectId || db.projects[0]?.id || '';
+      setProjectId(initialProjId);
+      const prj = db.projects.find(p => p.id === initialProjId);
+      setCurrency(prj?.currency || 'SAR');
+      setExchangeRate(1.0);
       setCategory('software_servers');
       setDescription('');
       setVendor('');
@@ -54,34 +67,47 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     }
   }, [expenseToEdit, defaultProjectId, isOpen, db.expenses.length, db.projects]);
 
+  const handleProjectChange = (newProjId: string) => {
+    setProjectId(newProjId);
+    if (!expenseToEdit) {
+      const prj = db.projects.find(p => p.id === newProjId);
+      if (prj) {
+        setCurrency(prj.currency || 'SAR');
+        setExchangeRate(1.0);
+      }
+    }
+  };
+
+  const currSymbol = CURRENCY_INFO[currency]?.symbol || currency;
+  const convertedAmountToProject = convertTransactionAmount(
+    amount,
+    currency,
+    projectCurrency,
+    exchangeRate
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!projectId || !description.trim() || amount <= 0) return;
 
+    const payload = {
+      expenseNumber,
+      projectId,
+      currency,
+      exchangeRate: currency === projectCurrency ? 1.0 : (Number(exchangeRate) || 1.0),
+      category,
+      description,
+      vendor,
+      amount: Number(amount) || 0,
+      expenseDate,
+      paymentMethod,
+      receiptReference,
+    };
+
     if (expenseToEdit) {
-      updateExpense(expenseToEdit.id, {
-        expenseNumber,
-        projectId,
-        category,
-        description,
-        vendor,
-        amount: Number(amount) || 0,
-        expenseDate,
-        paymentMethod,
-        receiptReference,
-      });
+      updateExpense(expenseToEdit.id, payload);
     } else {
-      addExpense({
-        expenseNumber,
-        projectId,
-        category,
-        description,
-        vendor,
-        amount: Number(amount) || 0,
-        expenseDate,
-        paymentMethod,
-        receiptReference,
-      });
+      addExpense(payload);
     }
     onClose();
   };
@@ -130,16 +156,27 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
           <select
             required
             value={projectId}
-            onChange={e => setProjectId(e.target.value)}
+            onChange={e => handleProjectChange(e.target.value)}
             className="w-full text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
           >
             {db.projects.map(p => (
               <option key={p.id} value={p.id}>
-                {p.code} - {p.name}
+                {p.code} - {p.name} ({p.currency || 'SAR'})
               </option>
             ))}
           </select>
         </div>
+
+        {/* Currency & Exchange Rate Selector */}
+        <CurrencyExchangeField
+          selectedCurrency={currency}
+          onCurrencyChange={setCurrency}
+          projectCurrency={projectCurrency}
+          exchangeRate={exchangeRate}
+          onExchangeRateChange={setExchangeRate}
+          amount={amount}
+          transactionTypeLabel="المصروف"
+        />
 
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -188,17 +225,22 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              المبلغ (SAR) <span className="text-rose-500">*</span>
+              المبلغ ({currSymbol}) <span className="text-rose-500">*</span>
             </label>
             <input
               type="number"
-              min="1"
-              step="50"
+              min="0.01"
+              step="any"
               required
               value={amount}
               onChange={e => setAmount(Number(e.target.value))}
               className="w-full text-xs font-mono font-bold text-rose-800 bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
             />
+            {currency !== projectCurrency && (
+              <span className="text-[10px] text-slate-500 block mt-1 font-mono">
+                يعادل: {formatCurrency(convertedAmountToProject, projectCurrency)}
+              </span>
+            )}
           </div>
 
           <div>

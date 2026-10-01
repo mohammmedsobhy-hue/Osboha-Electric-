@@ -17,6 +17,7 @@ import {
   User as UserIcon,
   FileSpreadsheet,
   LogIn,
+  AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ROLE_DEFINITIONS, UserRole } from '../../types';
@@ -37,6 +38,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, onOpenQuickActi
     exportDatabaseJSON,
     activeTab,
     setActiveTab,
+    setSelectedProjectId,
     currentUser,
     switchRole,
     userPermissions,
@@ -46,6 +48,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, onOpenQuickActi
   const [dataMenuOpen, setDataMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [alertMenuOpen, setAlertMenuOpen] = useState(false);
+
+  // Budget alerts detection for navbar quick bell
+  const budgetAlertProjects = db.projects.filter(p => {
+    if (!p.approvedBudget || p.approvedBudget <= 0) return false;
+    const fin = allProjectFinancials.get(p.id);
+    return (fin?.budgetUsagePercent || 0) >= 80;
+  });
+
+  const hasCriticalAlert = budgetAlertProjects.some(p => {
+    const fin = allProjectFinancials.get(p.id);
+    return (fin?.budgetUsagePercent || 0) >= 100;
+  });
 
   const currentRoleMeta = ROLE_DEFINITIONS[currentUser?.role || 'admin'];
 
@@ -122,6 +137,97 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, onOpenQuickActi
 
       {/* Zone 3: Actions & User RBAC Switcher */}
       <div className="flex items-center gap-2">
+        {/* Budget Alert Bell / Warning Dropdown */}
+        {budgetAlertProjects.length > 0 && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setAlertMenuOpen(prev => !prev)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all text-xs font-semibold ${
+                hasCriticalAlert
+                  ? 'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100 ring-2 ring-rose-100'
+                  : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'
+              }`}
+              title="تنبيهات اقتراب أو تجاوز الميزانية للمشاريع"
+            >
+              <AlertTriangle className={`w-3.5 h-3.5 ${hasCriticalAlert ? 'text-rose-600 animate-pulse' : 'text-amber-600'}`} />
+              <span className="hidden sm:inline">تنبيهات الميزانية</span>
+              <span className={`px-1.5 py-0.2 rounded-full font-mono text-[10px] font-bold ${
+                hasCriticalAlert ? 'bg-rose-600 text-white' : 'bg-amber-600 text-white'
+              }`}>
+                {budgetAlertProjects.length}
+              </span>
+            </button>
+
+            {alertMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setAlertMenuOpen(false)} />
+                <div className="absolute left-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50 text-right animate-in fade-in duration-100">
+                  <div className="px-3 py-1.5 text-xs font-bold text-slate-800 border-b border-slate-100 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" />
+                      <span>تنبيهات الميزانيات المعتمدة</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {budgetAlertProjects.length} تنبيه
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                    {budgetAlertProjects.map(proj => {
+                      const fin = allProjectFinancials.get(proj.id);
+                      const usage = fin?.budgetUsagePercent || 0;
+                      const isOver = usage >= 100;
+                      const remaining = (proj.approvedBudget || 0) - (fin?.totalExpenses || 0);
+
+                      return (
+                        <div
+                          key={proj.id}
+                          onClick={() => {
+                            setAlertMenuOpen(false);
+                            setSelectedProjectId(proj.id);
+                          }}
+                          className="p-3 hover:bg-slate-50 transition-colors cursor-pointer text-xs"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="font-bold text-slate-900 leading-tight">
+                              {proj.name}
+                            </div>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
+                              isOver ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {usage.toFixed(0)}%
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between font-mono">
+                            <span>الميزانية: {proj.approvedBudget?.toLocaleString()} {proj.currency}</span>
+                            <span className={isOver ? 'text-rose-700 font-bold' : 'text-amber-700'}>
+                              {isOver ? `عجز: ${Math.abs(remaining).toLocaleString()} ${proj.currency}` : `متبقي: ${remaining.toLocaleString()} ${proj.currency}`}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="p-2 border-t border-slate-100 text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAlertMenuOpen(false);
+                        setActiveTab('dashboard');
+                      }}
+                      className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold hover:underline"
+                    >
+                      عرض تفاصيل التنبيهات في لوحة التحكم ←
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Quick Action Button Dropdown */}
         <div className="relative">
           <button

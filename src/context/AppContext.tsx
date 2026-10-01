@@ -8,6 +8,7 @@ import {
   Client,
   TeamMember,
   Project,
+  ProjectStatus,
   ProjectTeamAssignment,
   Invoice,
   ClientPayment,
@@ -18,6 +19,7 @@ import {
   DashboardFilters,
   ProjectTask,
   TaskStatus,
+  ProjectAttachment,
   User,
   UserRole,
   RolePermissions,
@@ -26,6 +28,8 @@ import {
 } from '../types';
 import {
   DEFAULT_EXCHANGE_RATE_SAR_TO_EGP,
+  CURRENCY_INFO,
+  PROJECT_STATUS_MAP,
 } from '../utils/formatters';
 import {
   AppDatabase,
@@ -80,6 +84,11 @@ interface AppContextType {
   updateUser: (id: string, updates: Partial<User>) => void;
   deleteUser: (id: string) => void;
 
+  // Project Attachments & Documents
+  addProjectAttachment: (attachment: Omit<ProjectAttachment, 'id' | 'uploadedAt'>) => string;
+  updateProjectAttachment: (id: string, updates: Partial<ProjectAttachment>) => void;
+  deleteProjectAttachment: (id: string) => void;
+
   // Project Actions
   addProject: (
     project: Omit<Project, 'id' | 'createdAt'>,
@@ -90,6 +99,7 @@ interface AppContextType {
     updates: Partial<Project>,
     assignments?: Omit<ProjectTeamAssignment, 'id' | 'projectId'>[]
   ) => void;
+  updateProjectStatus: (id: string, newStatus: ProjectStatus, note?: string) => void;
   deleteProject: (id: string) => void;
 
   // Client Actions
@@ -291,6 +301,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('تم تحديث بيانات المشروع والمستحقات.');
   };
 
+  const updateProjectStatus = (id: string, newStatus: ProjectStatus, note?: string) => {
+    let projName = '';
+    setDb(prev => {
+      const target = prev.projects.find(p => p.id === id);
+      if (target) projName = target.name;
+      return {
+        ...prev,
+        projects: prev.projects.map(p => {
+          if (p.id !== id) return p;
+          return {
+            ...p,
+            status: newStatus,
+            statusUpdatedAt: new Date().toISOString(),
+            statusNote: note !== undefined ? note : p.statusNote,
+          };
+        }),
+      };
+    });
+    const statusLabel = PROJECT_STATUS_MAP[newStatus]?.label || newStatus;
+    showToast(`تم تحديث حالة المشروع "${projName || id}" إلى: ${statusLabel}`);
+  };
+
   const deleteProject = (id: string) => {
     setDb(prev => ({
       ...prev,
@@ -413,7 +445,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setDb(prev => ({ ...prev, clientPayments: [newPayment, ...prev.clientPayments] }));
-    showToast(`تم تسجيل دفعة العميل بمبلغ ${paymentData.amount.toLocaleString()} ر.س.`);
+    const currSymbol = CURRENCY_INFO[paymentData.currency || 'SAR']?.symbol || paymentData.currency || 'ر.س';
+    showToast(`تم تسجيل دفعة العميل بمبلغ ${paymentData.amount.toLocaleString()} ${currSymbol}.`);
     return id;
   };
 
@@ -442,7 +475,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setDb(prev => ({ ...prev, teamPayments: [newPayment, ...prev.teamPayments] }));
-    showToast(`تم صرف دفعة للفريق بمبلغ ${paymentData.amount.toLocaleString()} ر.س.`);
+    const currSymbol = CURRENCY_INFO[paymentData.currency || 'SAR']?.symbol || paymentData.currency || 'ر.س';
+    showToast(`تم صرف دفعة للفريق بمبلغ ${paymentData.amount.toLocaleString()} ${currSymbol}.`);
     return id;
   };
 
@@ -471,7 +505,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setDb(prev => ({ ...prev, expenses: [newExpense, ...prev.expenses] }));
-    showToast(`تم تسجيل المصروف بقيمة ${expenseData.amount.toLocaleString()} ر.س.`);
+    const expSymbol = CURRENCY_INFO[expenseData.currency || 'SAR']?.symbol || expenseData.currency || 'ر.س';
+    showToast(`تم تسجيل المصروف بقيمة ${expenseData.amount.toLocaleString()} ${expSymbol}.`);
     return id;
   };
 
@@ -538,7 +573,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (!status) {
           if (newProgress === 100) computedStatus = 'completed';
           else if (newProgress > 0) computedStatus = 'in_progress';
-          else computedStatus = 'not_started';
+          else computedStatus = 'pending';
         }
         return {
           ...t,
@@ -583,6 +618,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       users: (prev.users || []).filter(u => u.id !== id),
     }));
     showToast('تم حذف حساب المستخدم.');
+  };
+
+  // ---------------- PROJECT ATTACHMENTS & DOCUMENTS ACTIONS ----------------
+  const addProjectAttachment = (attData: Omit<ProjectAttachment, 'id' | 'uploadedAt'>) => {
+    const id = `att-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    const newAtt: ProjectAttachment = {
+      ...attData,
+      id,
+      uploadedAt: new Date().toISOString(),
+    };
+    setDb(prev => ({
+      ...prev,
+      attachments: [newAtt, ...(prev.attachments || [])],
+    }));
+    showToast(`تم رفع وإضافة المرفق "${newAtt.name}" بنجاح.`);
+    return id;
+  };
+
+  const updateProjectAttachment = (id: string, updates: Partial<ProjectAttachment>) => {
+    setDb(prev => ({
+      ...prev,
+      attachments: (prev.attachments || []).map(a => (a.id === id ? { ...a, ...updates } : a)),
+    }));
+    showToast('تم تحديث بيانات المرفق بنجاح.');
+  };
+
+  const deleteProjectAttachment = (id: string) => {
+    setDb(prev => ({
+      ...prev,
+      attachments: (prev.attachments || []).filter(a => a.id !== id),
+    }));
+    showToast('تم حذف المرفق من المشروع.');
   };
 
   // ---------------- BACKUP & SAMPLE DATA ----------------
@@ -660,8 +727,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addUser,
         updateUser,
         deleteUser,
+        addProjectAttachment,
+        updateProjectAttachment,
+        deleteProjectAttachment,
         addProject,
         updateProject,
+        updateProjectStatus,
         deleteProject,
         addClient,
         updateClient,

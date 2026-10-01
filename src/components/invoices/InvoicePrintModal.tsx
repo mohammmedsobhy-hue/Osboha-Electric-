@@ -25,7 +25,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoiceId,
   const invCalculated = fin?.invoices.find(i => i.id === invoice.id);
 
   const invCurrency = invoice.currency || project?.currency || 'SAR';
-  const currSymbol = CURRENCY_INFO[invCurrency].symbol;
+  const currSymbol = CURRENCY_INFO[invCurrency]?.symbol || invCurrency;
 
   const status = invCalculated?.status || 'unpaid';
   const statusMeta = INVOICE_STATUS_MAP[status];
@@ -141,6 +141,21 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoiceId,
                 <span className="text-slate-500 font-sans">تاريخ الاستحقاق:</span>
                 <span className="text-slate-800 font-bold">{formatDate(invoice.dueDate)}</span>
               </div>
+              <div className="flex justify-between border-t border-slate-200 pt-1">
+                <span className="text-slate-500 font-sans">عملة الفاتورة:</span>
+                <span className="font-bold text-slate-900 font-sans flex items-center gap-1">
+                  <span>{CURRENCY_INFO[invCurrency]?.flag || '🌐'}</span>
+                  <span>{CURRENCY_INFO[invCurrency]?.name || invCurrency} ({invCurrency} - {currSymbol})</span>
+                </span>
+              </div>
+              {invoice.currency && project && invoice.currency !== project.currency && (
+                <div className="flex justify-between border-t border-slate-200 pt-1 text-[11px]">
+                  <span className="text-slate-500 font-sans">سعر الصرف المعتمد:</span>
+                  <span className="text-emerald-800 font-bold">
+                    1 {currSymbol} = {invoice.exchangeRate || 1} {CURRENCY_INFO[project.currency]?.symbol || project.currency}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -208,7 +223,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoiceId,
 
           {/* Footer & Stamp */}
           <div className="pt-6 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-400">
-            <span>فاتورة إلكترونية معتمدة صادرة من نظام Osboha Electric المالي</span>
+            <span>فاتورة إلكترونية معتمدة صادرة من منصة Osboha Electric لإدارة المشاريع والمالية والأرباح</span>
             <span className="font-mono">صفحة 1 من 1</span>
           </div>
         </div>

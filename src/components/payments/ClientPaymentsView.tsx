@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ArrowDownLeft, Plus, Search, Trash2, Edit, FileText, CheckCircle2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ClientPayment } from '../../types';
-import { formatSAR, formatDate, PAYMENT_METHOD_MAP } from '../../utils/formatters';
+import { formatSAR, formatCurrency, convertTransactionAmount, CURRENCY_INFO, formatDate, PAYMENT_METHOD_MAP } from '../../utils/formatters';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { StatCard } from '../common/StatCard';
 
@@ -109,6 +109,7 @@ export const ClientPaymentsView: React.FC<ClientPaymentsViewProps> = ({
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
                 <tr>
                   <th className="py-3 px-3.5">رقم الدفعة</th>
+                  <th className="py-3 px-3.5">العملة</th>
                   <th className="py-3 px-3.5">تاريخ الاستلام</th>
                   <th className="py-3 px-3.5">المشروع</th>
                   <th className="py-3 px-3.5">العميل</th>
@@ -130,6 +131,19 @@ export const ClientPaymentsView: React.FC<ClientPaymentsViewProps> = ({
                     <tr key={payment.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-3 px-3.5 font-mono font-bold text-slate-900">
                         {payment.paymentNumber}
+                      </td>
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        {(() => {
+                          const payCurr = payment.currency || project?.currency || 'SAR';
+                          const info = CURRENCY_INFO[payCurr];
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                              <span>{info?.flag || '🌐'}</span>
+                              <span className="font-mono">{payCurr}</span>
+                              <span className="text-slate-500 font-normal text-[10px]">({info?.symbol || payCurr})</span>
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="py-3 px-3.5 font-mono text-slate-600">
                         {formatDate(payment.paymentDate)}
@@ -162,9 +176,23 @@ export const ClientPaymentsView: React.FC<ClientPaymentsViewProps> = ({
                       <td className="py-3 px-3.5 font-mono text-slate-500">
                         {payment.referenceNumber || '-'}
                       </td>
-                      <td className="py-3 px-3.5 font-mono font-bold text-emerald-700 text-sm">
-                        +{formatSAR(payment.amount)}
-                      </td>
+                      {(() => {
+                        const payCurr = payment.currency || project?.currency || 'SAR';
+                        const isDiff = project && payCurr !== project.currency;
+                        const converted = isDiff
+                          ? convertTransactionAmount(payment.amount, payCurr, project.currency, payment.exchangeRate)
+                          : payment.amount;
+                        return (
+                          <td className="py-3 px-3.5 font-mono font-bold text-emerald-700 text-sm">
+                            <div>+{formatCurrency(payment.amount, payCurr)}</div>
+                            {isDiff && (
+                              <div className="text-[10px] text-slate-500 font-sans font-normal mt-0.5">
+                                يعادل: {formatCurrency(converted, project.currency)}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })()}
                       <td className="py-3 px-3.5 text-slate-500 max-w-[150px] truncate" title={payment.notes}>
                         {payment.notes || '-'}
                       </td>

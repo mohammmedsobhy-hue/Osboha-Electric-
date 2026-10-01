@@ -21,6 +21,7 @@ import {
   EXPENSE_CATEGORY_MAP,
   PAYMENT_METHOD_MAP,
   formatSAR,
+  formatCurrency,
   formatDate,
 } from './formatters';
 
@@ -346,7 +347,7 @@ export function exportDocumentToPDF(options: PDFExportOptions) {
           <div class="logo-badge" style="background: linear-gradient(135deg, #0f172a, #1e293b); border: 2px solid #38bdf8; color: #fbbf24; font-size: 18px;">⚡</div>
           <div class="brand-text">
             <h1 style="font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px;">Osboha Electric</h1>
-            <p>للمقاولات والأعمال الهندسية الكهربائية · إدارة المشاريع والمالية</p>
+            <p>للمقاولات والأعمال الهندسية الكهربائية · إدارة المشاريع والمالية والأرباح</p>
           </div>
         </div>
         <div class="doc-meta">
@@ -372,7 +373,7 @@ export function exportDocumentToPDF(options: PDFExportOptions) {
       ${options.footerNotes ? `<div style="font-size: 11px; color: #64748b; margin-top: 10px;">${options.footerNotes}</div>` : ''}
 
       <div class="footer">
-        <div>تم التصدير آلياً عبر منصة Osboha Electric لإدارة المشاريع والحسابات والأرباح</div>
+        <div>تم التصدير آلياً عبر منصة Osboha Electric لإدارة المشاريع والمالية والأرباح</div>
         <div>صفحة 1 من 1</div>
       </div>
 
@@ -547,13 +548,15 @@ export function exportInvoicesData(
     'رقم الفاتورة',
     'المشروع',
     'العميل',
+    'العملة',
+    'سعر الصرف',
     'تاريخ الإصدار',
     'تاريخ الاستحقاق',
-    'المبلغ قبل الضريبة (SAR)',
-    'ضريبة القيمة المضافة (SAR)',
-    'إجمالي الفاتورة (SAR)',
-    'المبلغ المحصل (SAR)',
-    'المتبقي (SAR)',
+    'المبلغ قبل الضريبة',
+    'ضريبة القيمة المضافة',
+    'إجمالي الفاتورة',
+    'المبلغ المحصل',
+    'المتبقي',
     'الحالة',
   ];
 
@@ -566,11 +569,15 @@ export function exportInvoicesData(
     const paid = calc?.paidAmount || 0;
     const remaining = calc?.remainingAmount ?? inv.totalAmount;
     const status = calc?.status || 'unpaid';
+    const curr = inv.currency || p?.currency || 'SAR';
+    const rate = inv.exchangeRate || 1.0;
 
     return [
       inv.invoiceNumber,
       p?.name || '-',
       c?.name || c?.companyName || '-',
+      curr,
+      rate,
       formatDate(inv.issueDate),
       formatDate(inv.dueDate),
       inv.subtotal,
@@ -617,12 +624,14 @@ export function exportInvoicesData(
         r[2],
         r[3],
         r[4],
-        formatSAR(Number(r[5])),
-        formatSAR(Number(r[6])),
-        formatSAR(Number(r[7])),
-        formatSAR(Number(r[8])),
-        formatSAR(Number(r[9])),
-        r[10],
+        r[5],
+        r[6],
+        formatCurrency(Number(r[7]), String(r[3])),
+        formatCurrency(Number(r[8]), String(r[3])),
+        formatCurrency(Number(r[9]), String(r[3])),
+        formatCurrency(Number(r[10]), String(r[3])),
+        formatCurrency(Number(r[11]), String(r[3])),
+        r[12],
       ]),
     });
   } else {
@@ -680,10 +689,12 @@ export function exportFullPlatformExcelBackup(db: any, allProjectFinancials: Map
   ]);
 
   // 4. Invoices Sheet
-  const invoiceHeaders = ['رقم الفاتورة', 'معرف المشروع', 'تاريخ الإصدار', 'تاريخ الاستحقاق', 'المبلغ قبل الضريبة', 'الضريبة', 'الإجمالي'];
+  const invoiceHeaders = ['رقم الفاتورة', 'معرف المشروع', 'العملة', 'سعر الصرف', 'تاريخ الإصدار', 'تاريخ الاستحقاق', 'المبلغ قبل الضريبة', 'الضريبة', 'الإجمالي'];
   const invoiceRows = db.invoices.map((i: any) => [
     i.invoiceNumber,
     i.projectId,
+    i.currency || 'SAR',
+    i.exchangeRate || 1.0,
     i.issueDate,
     i.dueDate,
     i.subtotal,
@@ -692,10 +703,12 @@ export function exportFullPlatformExcelBackup(db: any, allProjectFinancials: Map
   ]);
 
   // 5. Client Payments Sheet
-  const clientPayHeaders = ['رقم السند', 'معرف المشروع', 'المبلغ', 'التاريخ', 'طريقة الدفع', 'الرقم المرجعي', 'ملاحظات'];
+  const clientPayHeaders = ['رقم السند', 'معرف المشروع', 'العملة', 'سعر الصرف', 'المبلغ', 'التاريخ', 'طريقة الدفع', 'الرقم المرجعي', 'ملاحظات'];
   const clientPayRows = db.clientPayments.map((cp: any) => [
     cp.paymentNumber,
     cp.projectId,
+    cp.currency || 'SAR',
+    cp.exchangeRate || 1.0,
     cp.amount,
     cp.paymentDate,
     cp.paymentMethod,
@@ -704,11 +717,13 @@ export function exportFullPlatformExcelBackup(db: any, allProjectFinancials: Map
   ]);
 
   // 6. Team Payments Sheet
-  const teamPayHeaders = ['رقم السند', 'معرف المشروع', 'معرف العضو', 'المبلغ', 'التاريخ', 'طريقة الدفع', 'الرقم المرجعي'];
+  const teamPayHeaders = ['رقم السند', 'معرف المشروع', 'معرف العضو', 'العملة', 'سعر الصرف', 'المبلغ', 'التاريخ', 'طريقة الدفع', 'الرقم المرجعي'];
   const teamPayRows = db.teamPayments.map((tp: any) => [
     tp.paymentNumber,
     tp.projectId,
     tp.teamMemberId,
+    tp.currency || 'SAR',
+    tp.exchangeRate || 1.0,
     tp.amount,
     tp.paymentDate,
     tp.paymentMethod,
@@ -716,10 +731,12 @@ export function exportFullPlatformExcelBackup(db: any, allProjectFinancials: Map
   ]);
 
   // 7. Expenses Sheet
-  const expenseHeaders = ['رقم المصروف', 'معرف المشروع', 'التصنيف', 'الوصف', 'المورد', 'المبلغ', 'التاريخ', 'طريقة الدفع'];
+  const expenseHeaders = ['رقم المصروف', 'معرف المشروع', 'العملة', 'سعر الصرف', 'التصنيف', 'الوصف', 'المورد', 'المبلغ', 'التاريخ', 'طريقة الدفع'];
   const expenseRows = db.expenses.map((e: any) => [
     e.expenseNumber,
     e.projectId,
+    e.currency || 'SAR',
+    e.exchangeRate || 1.0,
     EXPENSE_CATEGORY_MAP[e.category as keyof typeof EXPENSE_CATEGORY_MAP] || e.category,
     e.description,
     e.vendor,

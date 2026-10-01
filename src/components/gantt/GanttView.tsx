@@ -19,7 +19,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ProjectTask, CalculatedTask } from '../../types';
 import { calculateCriticalPath } from '../../utils/ganttCalculator';
-import { formatDate } from '../../utils/formatters';
+import { formatDate, getTaskStatusInfo } from '../../utils/formatters';
 import { TaskModal } from './TaskModal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { StatCard } from '../common/StatCard';
@@ -373,6 +373,16 @@ export const GanttView: React.FC = () => {
 
                         {/* Assignee & Controls */}
                         <div className="flex items-center gap-1.5 shrink-0">
+                          {(() => {
+                            const statusInfo = getTaskStatusInfo(task.status);
+                            return (
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border hidden sm:inline-flex items-center gap-1 ${statusInfo.badgeClass}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dotClass}`} />
+                                <span>{statusInfo.emoji} {statusInfo.label}</span>
+                              </span>
+                            );
+                          })()}
+
                           {member && (
                             <span
                               className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-0.5 truncate max-w-[80px]"

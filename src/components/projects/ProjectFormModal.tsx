@@ -34,6 +34,7 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [status, setStatus] = useState<ProjectStatus>('in_progress');
+  const [statusNote, setStatusNote] = useState('');
   const [description, setDescription] = useState('');
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
 
@@ -48,6 +49,7 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
       setStartDate(projectToEdit.startDate);
       setEndDate(projectToEdit.endDate);
       setStatus(projectToEdit.status);
+      setStatusNote(projectToEdit.statusNote || '');
       setDescription(projectToEdit.description || '');
 
       // Load existing assignments
@@ -127,6 +129,8 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
           startDate,
           endDate,
           status,
+          statusNote: statusNote.trim() || undefined,
+          statusUpdatedAt: new Date().toISOString(),
           description,
         },
         assignments
@@ -143,6 +147,8 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
           startDate,
           endDate,
           status,
+          statusNote: statusNote.trim() || undefined,
+          statusUpdatedAt: new Date().toISOString(),
           description,
         },
         assignments
@@ -346,18 +352,33 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">حالة المشروع</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              حالة سير عمل المشروع <span className="text-rose-500">*</span>
+            </label>
             <select
               value={status}
               onChange={e => setStatus(e.target.value as ProjectStatus)}
               className="w-full text-xs font-medium text-slate-900 bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
             >
-              {Object.entries(PROJECT_STATUS_MAP).map(([key, val]) => (
-                <option key={key} value={key}>
-                  {val.label}
-                </option>
-              ))}
+              <option value="in_progress">⚡ قيد التنفيذ (In Progress)</option>
+              <option value="completed">✅ مكتمل (Completed)</option>
+              <option value="on_hold">⏸️ متوقف (On Hold)</option>
+              <option value="planning">📋 تخطيط (Planning)</option>
+              <option value="cancelled">🚫 ملغي (Cancelled)</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              ملاحظة أو سبب الحالة (اختياري)
+            </label>
+            <input
+              type="text"
+              value={statusNote}
+              onChange={e => setStatusNote(e.target.value)}
+              placeholder="مثال: متوقف مؤقتاً في انتظار موافقة العميل على الـ API"
+              className="w-full text-xs text-slate-900 bg-white border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+            />
           </div>
 
           <div>
